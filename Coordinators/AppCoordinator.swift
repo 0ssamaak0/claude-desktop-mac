@@ -1,6 +1,6 @@
 //
 //  AppCoordinator.swift
-//  GeminiDesktop
+//  ClaudeDesktop
 //
 //  Created by alexcding on 2025-12-13.
 //
@@ -229,7 +229,7 @@ extension AppCoordinator {
     struct Constants {
         static let dockOffset: CGFloat = 50
         static let mainWindowIdentifier = "main"
-        static let mainWindowTitle = "Gemini Desktop"
+        static let mainWindowTitle = "Claude Desktop"
     }
 
 }

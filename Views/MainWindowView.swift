@@ -1,6 +1,6 @@
 //
 //  MainWindowContent.swift
-//  GeminiDesktop
+//  ClaudeDesktop
 //
 //  Created by alexcding on 2025-12-13.
 //
@@ -14,7 +14,7 @@ struct MainWindowView: View {
 
     var body: some View {
         ZStack {
-            GeminiWebView(webView: coordinator.webViewModel.wkWebView)
+            ClaudeWebView(webView: coordinator.webViewModel.wkWebView)
 
             if coordinator.webViewModel.isLoading {
                 ProgressView()

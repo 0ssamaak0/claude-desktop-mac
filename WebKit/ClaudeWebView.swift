@@ -1,6 +1,6 @@
 //
-//  GeminiWebView.swift
-//  GeminiDesktop
+//  ClaudeWebView.swift
+//  ClaudeDesktop
 //
 //  Created by alexcding on 2025-12-13.
 //
@@ -8,7 +8,7 @@
 import SwiftUI
 import WebKit
 
-struct GeminiWebView: NSViewRepresentable {
+struct ClaudeWebView: NSViewRepresentable {
     let webView: WKWebView
 
     func makeNSView(context: Context) -> WebViewContainer {
@@ -56,7 +56,6 @@ struct GeminiWebView: NSViewRepresentable {
             let downloadsURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
             var destination = downloadsURL.appendingPathComponent(suggestedFilename)
 
-            // Handle duplicate filenames
             var counter = 1
             let fileManager = FileManager.default
             let nameWithoutExtension = destination.deletingPathExtension().lastPathComponent
@@ -109,7 +108,7 @@ struct GeminiWebView: NSViewRepresentable {
             alert.addButton(withTitle: "OK")
             alert.addButton(withTitle: "Cancel")
 
-            let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: GeminiWebView.Constants.textFieldWidth, height: GeminiWebView.Constants.textFieldHeight))
+            let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: ClaudeWebView.Constants.textFieldWidth, height: ClaudeWebView.Constants.textFieldHeight))
             textField.stringValue = defaultText ?? ""
             alert.accessoryView = textField
 
@@ -117,7 +116,9 @@ struct GeminiWebView: NSViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
-            decisionHandler(origin.host.contains(GeminiWebView.Constants.trustedHost) ? .grant : .prompt)
+            let host = origin.host.lowercased()
+            let trusted = host.contains("claude.ai") || host.contains("anthropic.com")
+            decisionHandler(trusted ? .grant : .prompt)
         }
 
         func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
@@ -125,8 +126,6 @@ struct GeminiWebView: NSViewRepresentable {
             panel.allowsMultipleSelection = parameters.allowsMultipleSelection
             panel.canChooseDirectories = parameters.allowsDirectories
             panel.canChooseFiles = true
-            // Activate the app so the file dialog receives focus,
-            // especially when triggered from the non-activating floating panel
             NSApp.activate(ignoringOtherApps: true)
             panel.begin { response in
                 completionHandler(response == .OK ? panel.urls : nil)
@@ -135,9 +134,11 @@ struct GeminiWebView: NSViewRepresentable {
 
         private func isExternalURL(_ url: URL) -> Bool {
             guard let host = url.host?.lowercased() else { return false }
-            // Only Gemini-related domains stay in the app
-            let internalHosts = ["gemini.google.com", "accounts.google.com"]
-            let internalSuffixes = [".googleapis.com", ".gstatic.com"]
+            let internalHosts: Set<String> = [
+                "claude.ai", "www.claude.ai",
+                "accounts.anthropic.com", "accounts.google.com"
+            ]
+            let internalSuffixes = [".anthropic.com", ".claude.ai", ".googleapis.com", ".gstatic.com"]
 
             if internalHosts.contains(host) { return false }
             for suffix in internalSuffixes {
@@ -150,10 +151,10 @@ struct GeminiWebView: NSViewRepresentable {
 
 class WebViewContainer: NSView {
     let webView: WKWebView
-    let coordinator: GeminiWebView.Coordinator
+    let coordinator: ClaudeWebView.Coordinator
     private var windowObserver: NSObjectProtocol?
 
-    init(webView: WKWebView, coordinator: GeminiWebView.Coordinator) {
+    init(webView: WKWebView, coordinator: ClaudeWebView.Coordinator) {
         self.webView = webView
         self.coordinator = coordinator
         super.init(frame: .zero)
@@ -172,7 +173,6 @@ class WebViewContainer: NSView {
     }
 
     private func setupWindowObserver() {
-        // Observe when ANY window becomes key - then check if we should have the webView
         windowObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didBecomeKeyNotification,
             object: nil,
@@ -181,7 +181,6 @@ class WebViewContainer: NSView {
             guard let self = self,
                   let keyWindow = notification.object as? NSWindow,
                   self.window === keyWindow else { return }
-            // Our window became key, attach webView
             self.attachWebView()
         }
     }
@@ -212,12 +211,11 @@ class WebViewContainer: NSView {
 }
 
 
-extension GeminiWebView {
+extension ClaudeWebView {
 
     struct Constants {
         static let textFieldWidth: CGFloat = 200
         static let textFieldHeight: CGFloat = 24
-        static let trustedHost = "google.com"
     }
 
 }

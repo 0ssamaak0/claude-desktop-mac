@@ -11,48 +11,48 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		74CBD8AA2EED8FCB00F226E3 /* Gemini Desktop.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Gemini Desktop.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		74CBD8AA2EED8FCB00F226E3 /* Claude Desktop.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Claude Desktop.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		749D25F02EEE2C330054BA29 /* Exceptions for "App" folder in "GeminiDesktop" target */ = {
+		749D25F02EEE2C330054BA29 /* Exceptions for "App" folder in "ClaudeDesktop" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				AppDelegate.swift,
-				GeminiDesktopApp.swift,
+				ClaudeDesktopApp.swift,
 			);
-			target = 74CBD8A92EED8FCB00F226E3 /* GeminiDesktop */;
+			target = 74CBD8A92EED8FCB00F226E3 /* ClaudeDesktop */;
 		};
-		749D25F12EEE2C330054BA29 /* Exceptions for "Coordinators" folder in "GeminiDesktop" target */ = {
+		749D25F12EEE2C330054BA29 /* Exceptions for "Coordinators" folder in "ClaudeDesktop" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				AppCoordinator.swift,
 			);
-			target = 74CBD8A92EED8FCB00F226E3 /* GeminiDesktop */;
+			target = 74CBD8A92EED8FCB00F226E3 /* ClaudeDesktop */;
 		};
-		749D25F22EEE2C330054BA29 /* Exceptions for "Resources" folder in "GeminiDesktop" target */ = {
+		749D25F22EEE2C330054BA29 /* Exceptions for "Resources" folder in "ClaudeDesktop" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				AppIcon.icon,
 				Assets.xcassets,
 			);
-			target = 74CBD8A92EED8FCB00F226E3 /* GeminiDesktop */;
+			target = 74CBD8A92EED8FCB00F226E3 /* ClaudeDesktop */;
 		};
-		749D25F32EEE2C330054BA29 /* Exceptions for "Utils" folder in "GeminiDesktop" target */ = {
+		749D25F32EEE2C330054BA29 /* Exceptions for "Utils" folder in "ClaudeDesktop" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				"NSScreen+Extensions.swift",
 				UserDefaultsKeys.swift,
 			);
-			target = 74CBD8A92EED8FCB00F226E3 /* GeminiDesktop */;
+			target = 74CBD8A92EED8FCB00F226E3 /* ClaudeDesktop */;
 		};
-		749D26102EEE2E930054BA29 /* Exceptions for "ChatBar" folder in "GeminiDesktop" target */ = {
+		749D26102EEE2E930054BA29 /* Exceptions for "ChatBar" folder in "ClaudeDesktop" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				ChatBarPanel.swift,
 				ChatBarView.swift,
 			);
-			target = 74CBD8A92EED8FCB00F226E3 /* GeminiDesktop */;
+			target = 74CBD8A92EED8FCB00F226E3 /* ClaudeDesktop */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -65,7 +65,7 @@
 		749D25D32EEE2C330054BA29 /* App */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				749D25F02EEE2C330054BA29 /* Exceptions for "App" folder in "GeminiDesktop" target */,
+				749D25F02EEE2C330054BA29 /* Exceptions for "App" folder in "ClaudeDesktop" target */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -73,7 +73,7 @@
 		749D25D52EEE2C330054BA29 /* Coordinators */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				749D25F12EEE2C330054BA29 /* Exceptions for "Coordinators" folder in "GeminiDesktop" target */,
+				749D25F12EEE2C330054BA29 /* Exceptions for "Coordinators" folder in "ClaudeDesktop" target */,
 			);
 			path = Coordinators;
 			sourceTree = "<group>";
@@ -81,7 +81,7 @@
 		749D25DA2EEE2C330054BA29 /* Resources */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				749D25F22EEE2C330054BA29 /* Exceptions for "Resources" folder in "GeminiDesktop" target */,
+				749D25F22EEE2C330054BA29 /* Exceptions for "Resources" folder in "ClaudeDesktop" target */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -89,7 +89,7 @@
 		749D25DC2EEE2C330054BA29 /* Utils */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				749D25F32EEE2C330054BA29 /* Exceptions for "Utils" folder in "GeminiDesktop" target */,
+				749D25F32EEE2C330054BA29 /* Exceptions for "Utils" folder in "ClaudeDesktop" target */,
 			);
 			path = Utils;
 			sourceTree = "<group>";
@@ -102,7 +102,7 @@
 		749D25E32EEE2C330054BA29 /* ChatBar */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				749D26102EEE2E930054BA29 /* Exceptions for "ChatBar" folder in "GeminiDesktop" target */,
+				749D26102EEE2E930054BA29 /* Exceptions for "ChatBar" folder in "ClaudeDesktop" target */,
 			);
 			path = ChatBar;
 			sourceTree = "<group>";
@@ -138,7 +138,7 @@
 		74CBD8AB2EED8FCB00F226E3 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				74CBD8AA2EED8FCB00F226E3 /* Gemini Desktop.app */,
+				74CBD8AA2EED8FCB00F226E3 /* Claude Desktop.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -146,9 +146,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		74CBD8A92EED8FCB00F226E3 /* GeminiDesktop */ = {
+		74CBD8A92EED8FCB00F226E3 /* ClaudeDesktop */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 74CBD8B52EED8FCB00F226E3 /* Build configuration list for PBXNativeTarget "GeminiDesktop" */;
+			buildConfigurationList = 74CBD8B52EED8FCB00F226E3 /* Build configuration list for PBXNativeTarget "ClaudeDesktop" */;
 			buildPhases = (
 				74CBD8A62EED8FCB00F226E3 /* Sources */,
 				74CBD8A72EED8FCB00F226E3 /* Frameworks */,
@@ -162,12 +162,12 @@
 				7452D4CF2EF08E5D00EDD8A4 /* WebKit */,
 				749D25E12EEE2C330054BA29 /* Views */,
 			);
-			name = GeminiDesktop;
+			name = ClaudeDesktop;
 			packageProductDependencies = (
 				74CBD8BF2EED900000F226E3 /* KeyboardShortcuts */,
 			);
-			productName = GeminiDesktop;
-			productReference = 74CBD8AA2EED8FCB00F226E3 /* Gemini Desktop.app */;
+			productName = ClaudeDesktop;
+			productReference = 74CBD8AA2EED8FCB00F226E3 /* Claude Desktop.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -185,7 +185,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 74CBD8A52EED8FCA00F226E3 /* Build configuration list for PBXProject "GeminiDesktop" */;
+			buildConfigurationList = 74CBD8A52EED8FCA00F226E3 /* Build configuration list for PBXProject "ClaudeDesktop" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -202,7 +202,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				74CBD8A92EED8FCB00F226E3 /* GeminiDesktop */,
+				74CBD8A92EED8FCB00F226E3 /* ClaudeDesktop */,
 			);
 		};
 /* End PBXProject section */
@@ -355,7 +355,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Resources/GeminiDesktop.entitlements;
+				CODE_SIGN_ENTITLEMENTS = Resources/ClaudeDesktop.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Manual;
@@ -382,17 +382,17 @@
 				INFOPLIST_FILE = Resources/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Gemini may need camera access for video calls or image capture.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Claude may need camera access for video calls or image capture.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Gemini may need microphone access for voice input.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Claude may need microphone access for voice input.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 0.2.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.alexcding.geminidesktop;
-				PRODUCT_NAME = "Gemini Desktop";
+				PRODUCT_BUNDLE_IDENTIFIER = com.alexcding.claudedesktop;
+				PRODUCT_NAME = "Claude Desktop";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -406,7 +406,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Resources/GeminiDesktop.entitlements;
+				CODE_SIGN_ENTITLEMENTS = Resources/ClaudeDesktop.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Developer ID Application";
 				CODE_SIGN_STYLE = Manual;
@@ -434,19 +434,19 @@
 				INFOPLIST_FILE = Resources/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Gemini may need camera access for video calls or image capture.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Claude may need camera access for video calls or image capture.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Gemini may need microphone access for voice input.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Claude may need microphone access for voice input.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 0.2.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.alexcding.geminidesktop;
-				PRODUCT_NAME = "Gemini Desktop";
+				PRODUCT_BUNDLE_IDENTIFIER = com.alexcding.claudedesktop;
+				PRODUCT_NAME = "Claude Desktop";
 				PROVISIONING_PROFILE_SPECIFIER = "";
-				"PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = "Gemini Desktop Release";
+				"PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = "Claude Desktop Release";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -457,7 +457,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		74CBD8A52EED8FCA00F226E3 /* Build configuration list for PBXProject "GeminiDesktop" */ = {
+		74CBD8A52EED8FCA00F226E3 /* Build configuration list for PBXProject "ClaudeDesktop" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				74CBD8B32EED8FCB00F226E3 /* Debug */,
@@ -466,7 +466,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		74CBD8B52EED8FCB00F226E3 /* Build configuration list for PBXNativeTarget "GeminiDesktop" */ = {
+		74CBD8B52EED8FCB00F226E3 /* Build configuration list for PBXNativeTarget "ClaudeDesktop" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				74CBD8B62EED8FCB00F226E3 /* Debug */,

@@ -1,6 +1,6 @@
 //
 //  AppDelegate.swift
-//  GeminiDesktop
+//  ClaudeDesktop
 //
 
 import AppKit

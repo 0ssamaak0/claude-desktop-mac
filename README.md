@@ -1,15 +1,15 @@
-# Gemini Desktop for macOS (Unofficial)
+# Claude Desktop for macOS (Unofficial)
 
-An **unofficial macOS desktop wrapper** for Google Gemini, built as a lightweight desktop app that loads the official Gemini website.
+An **unofficial macOS desktop wrapper** for [Claude](https://claude.ai), built as a lightweight app that loads the official Claude web app.
 
 ![Desktop](docs/desktop.png)
 
 ![Chat Bar](docs/chat_bar.png)
 
 > **Disclaimer:**
-> This project is **not affiliated with, endorsed by, or sponsored by Google**.
-> "Gemini" is a trademark of **Google LLC**.
-> This app does not modify, scrape, or redistribute Gemini content — it simply loads the official website.
+> This project is **not affiliated with, endorsed by, or sponsored by Anthropic**.
+> "Claude" is a trademark of **Anthropic PBC** (or its affiliates).
+> This app does not modify, scrape, or redistribute Claude content — it simply loads the official website.
 
 ---
 
@@ -26,8 +26,8 @@ An **unofficial macOS desktop wrapper** for Google Gemini, built as a lightweigh
 - Native macOS desktop experience
 - Lightweight WebView wrapper
 - Adjustable text size (80%-120%)
-- Camera & microphone support for Gemini features
-- Uses the official Gemini web interface
+- Camera and microphone support where the web app requests them
+- Uses the official Claude web interface
 - No tracking, no data collection
 - Open source
 
@@ -36,26 +36,26 @@ An **unofficial macOS desktop wrapper** for Google Gemini, built as a lightweigh
 ## What This App Is (and Isn't)
 
 **This app is:**
-- A thin desktop wrapper around `https://gemini.google.com`
+- A thin desktop wrapper around `https://claude.ai`
 - A convenience app for macOS users
 
 **This app is NOT:**
-- An official Gemini client
-- A replacement for Google's website
-- A modified or enhanced version of Gemini
-- A Google-authored product
+- An official Claude client
+- A replacement for Anthropic’s website
+- A modified or enhanced version of Claude beyond the browser shell
+- An Anthropic-authored product
 
-All functionality is provided entirely by the Gemini web app itself.
+All functionality is provided entirely by the Claude web app itself.
 
 ---
 
 ## Login & Security Notes
 
-- Authentication is handled by Google on their website
+- Authentication is handled by Anthropic (and any identity providers they use) on their websites
 - This app does **not** intercept credentials
-- No user data is stored or transmitted by this app
+- No user data is stored or transmitted by this app beyond normal WebKit behavior
 
-> Note: Google may restrict or change login behavior for embedded browsers at any time.
+> Note: Login behavior for embedded browsers can change at any time.
 
 ---
 
@@ -75,6 +75,6 @@ All functionality is provided entirely by the Gemini web app itself.
 ```bash
 git clone https://github.com/alexcding/gemini-desktop-mac.git
 cd gemini-desktop-mac
-open GeminiMac.xcodeproj
+open ClaudeDesktop.xcodeproj
 # Build and run in Xcode
 ```

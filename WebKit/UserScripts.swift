@@ -1,6 +1,6 @@
 //
 //  UserScripts.swift
-//  GeminiDesktop
+//  ClaudeDesktop
 //
 //  Created by alexcding on 2025-12-15.
 //
@@ -66,11 +66,11 @@ enum UserScripts {
     })();
     """
 
-    /// JavaScript to fix IME Enter issue on Gemini
+    /// JavaScript to fix IME Enter issue in the web composer
     /// When using IME (e.g., Chinese/Japanese input), pressing Enter to confirm
     /// the IME composition should NOT send the message. This script intercepts
     /// Enter keydown events during and immediately after IME composition,
-    /// preventing them from reaching Gemini's send handler.
+    /// preventing them from reaching the page send handler.
     private static let imeFixSource = """
     (function() {
         'use strict';

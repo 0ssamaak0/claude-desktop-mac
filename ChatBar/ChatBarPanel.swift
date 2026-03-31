@@ -1,6 +1,6 @@
 //
 //  ChatBar.swift
-//  GeminiDesktop
+//  ClaudeDesktop
 //
 //  Created by alexcding on 2025-12-13.
 //
@@ -40,18 +40,23 @@ class ChatBarPanel: NSPanel, NSWindowDelegate {
     // Returns true if in a conversation (not on start page)
     private let checkConversationScript = """
         (function() {
-            const scroller = document.querySelector('infinite-scroller[data-test-id="chat-history-container"]');
-            if (!scroller) { return false; }
-            const hasResponseContainer = scroller.querySelector('response-container') !== null;
-            const hasRatingButtons = scroller.querySelector('[aria-label="Good response"], [aria-label="Bad response"]') !== null;
-            return hasResponseContainer || hasRatingButtons;
+            if (document.querySelector('[data-testid="conversation-turn"]') != null) { return true; }
+            if (document.querySelector('[data-is-streaming="true"]') != null) { return true; }
+            const main = document.querySelector('main');
+            if (!main) { return false; }
+            const articles = main.querySelectorAll('article, [data-turn], [class*="Message"]');
+            if (articles.length >= 2) { return true; }
+            const rows = main.querySelectorAll('[class*="message"], [class*="MessageRow"]');
+            return rows.length >= 2;
         })();
         """
 
     // JavaScript to focus the input field
     private let focusInputScript = """
         (function() {
-            const input = document.querySelector('rich-textarea[aria-label="Enter a prompt here"]') ||
+            const input = document.querySelector('div[contenteditable="true"][data-placeholder]') ||
+                          document.querySelector('textarea[placeholder*="Message"]') ||
+                          document.querySelector('textarea[placeholder*="Reply"]') ||
                           document.querySelector('[contenteditable="true"]') ||
                           document.querySelector('textarea');
             if (input) {
@@ -277,7 +282,7 @@ class ChatBarPanel: NSPanel, NSWindowDelegate {
         orderOut(nil)
     }
 
-    /// Handle CMD+N to open a new Gemini chat
+    /// Handle CMD+N to open a new Claude chat
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.modifierFlags.contains(.command) &&
            !event.modifierFlags.contains(.shift) &&
@@ -289,30 +294,12 @@ class ChatBarPanel: NSPanel, NSWindowDelegate {
         return super.performKeyEquivalent(with: event)
     }
 
-    /// Triggers a new chat by emulating Shift+Cmd+O (Google's shortcut)
     private func openNewChat() {
         guard let webView = webView else { return }
-        let script = """
-        (function() {
-            const event = new KeyboardEvent('keydown', {
-                key: 'O',
-                code: 'KeyO',
-                keyCode: 79,
-                which: 79,
-                shiftKey: true,
-                metaKey: true,
-                bubbles: true,
-                cancelable: true,
-                composed: true
-            });
-            document.activeElement.dispatchEvent(event);
-            document.dispatchEvent(event);
-        })();
-        """
-        webView.evaluateJavaScript(script) { [weak self] _, _ in
-            // Reset to initial size since we're starting a new chat
-            self?.resetToInitialSize()
+        if let url = URL(string: "https://claude.ai/new") {
+            webView.load(URLRequest(url: url))
         }
+        resetToInitialSize()
     }
 
     override var canBecomeKey: Bool { true }

@@ -1,6 +1,6 @@
 //
 //  WebViewModel.swift
-//  GeminiDesktop
+//  ClaudeDesktop
 //
 //  Created by alexcding on 2025-12-15.
 //
@@ -17,17 +17,16 @@ class ConsoleLogHandler: NSObject, WKScriptMessageHandler {
     }
 }
 
-/// Observable wrapper around WKWebView with Gemini-specific functionality
+/// Observable wrapper around WKWebView for the Claude web app
 @Observable
 class WebViewModel {
 
     // MARK: - Constants
 
-    static let geminiURL = URL(string: "https://gemini.google.com/app")!
+    static let claudeHomeURL = URL(string: "https://claude.ai/new")!
     static let defaultPageZoom: Double = 1.0
 
-    private static let geminiHost = "gemini.google.com"
-    private static let geminiAppPath = "/app"
+    private static let claudeHosts: Set<String> = ["claude.ai", "www.claude.ai"]
     private static var userAgent: String { UserAgentOption.currentUserAgentString }
     private static let minZoom: Double = 0.6
     private static let maxZoom: Double = 1.4
@@ -61,7 +60,7 @@ class WebViewModel {
     func loadHome() {
         isAtHome = true
         canGoBack = false
-        wkWebView.load(URLRequest(url: Self.geminiURL))
+        wkWebView.load(URLRequest(url: Self.claudeHomeURL))
     }
 
     func goBack() {
@@ -78,24 +77,8 @@ class WebViewModel {
     }
 
     func openNewChat() {
-        let script = """
-        (function() {
-            const event = new KeyboardEvent('keydown', {
-                key: 'O',
-                code: 'KeyO',
-                keyCode: 79,
-                which: 79,
-                shiftKey: true,
-                metaKey: true,
-                bubbles: true,
-                cancelable: true,
-                composed: true
-            });
-            document.activeElement.dispatchEvent(event);
-            document.dispatchEvent(event);
-        })();
-        """
-        wkWebView.evaluateJavaScript(script, completionHandler: nil)
+        let url = URL(string: "https://claude.ai/new")!
+        wkWebView.load(URLRequest(url: url))
     }
 
     // MARK: - Zoom
@@ -134,12 +117,10 @@ class WebViewModel {
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
 
-        // Add user scripts
         for script in UserScripts.createAllScripts() {
             configuration.userContentController.addUserScript(script)
         }
 
-        // Register console log message handler (debug only)
         #if DEBUG
         configuration.userContentController.add(consoleLogHandler, name: UserScripts.consoleLogHandler)
         #endif
@@ -181,10 +162,9 @@ class WebViewModel {
                 guard let self = self else { return }
                 guard let currentURL = webView.url else { return }
 
-                let isGeminiApp = currentURL.host == Self.geminiHost &&
-                                  currentURL.path.hasPrefix(Self.geminiAppPath)
+                let onClaudeHomeSurface = Self.isClaudeHomeSurface(currentURL)
 
-                if isGeminiApp {
+                if onClaudeHomeSurface {
                     self.isAtHome = true
                     self.canGoBack = false
                 } else {
@@ -193,5 +173,13 @@ class WebViewModel {
                 }
             }
         }
+    }
+
+    private static func isClaudeHomeSurface(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased(), claudeHosts.contains(host) else { return false }
+        let path = url.path
+        if path == "/" || path == "/new" { return true }
+        if path.hasPrefix("/chat") { return true }
+        return false
     }
 }

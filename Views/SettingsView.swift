@@ -128,7 +128,7 @@ struct SettingsView: View {
             Button("Cancel", role: .cancel) { }
             Button("Reset", role: .destructive) { clearWebsiteData() }
         } message: {
-            Text("This will clear all cookies, cache, and login sessions. You will need to sign in to Gemini again.")
+            Text("This will clear all cookies, cache, and login sessions. You will need to sign in to Claude again.")
         }
     }
 

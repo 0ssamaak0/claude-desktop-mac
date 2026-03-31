@@ -1,6 +1,6 @@
 //
 //  MenuBarContentView.swift
-//  GeminiDesktop
+//  ClaudeDesktop
 //
 //  Created by alexcding on 2025-12-13.
 //
@@ -17,7 +17,7 @@ struct MenuBarView: View {
             Button {
                 coordinator.openMainWindow()
             } label: {
-                Label("Open Gemini Desktop", systemImage: "macwindow")
+                Label("Open Claude Desktop", systemImage: "macwindow")
             }
 
             Button {

@@ -1,6 +1,6 @@
 //
 //  UserDefaultsKeys.swift
-//  GeminiDesktop
+//  ClaudeDesktop
 //
 //  Created by alexcding on 2025-12-13.
 //

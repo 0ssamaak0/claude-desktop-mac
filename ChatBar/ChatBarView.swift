@@ -1,6 +1,6 @@
 //
 //  ChatBarContent.swift
-//  GeminiDesktop
+//  ClaudeDesktop
 //
 //  Created by alexcding on 2025-12-13.
 //
@@ -72,7 +72,7 @@ struct ChatBarView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            GeminiWebView(webView: webView)
+            ClaudeWebView(webView: webView)
 
             // Expand button
             Button(action: onExpandToMain) {
@@ -87,7 +87,7 @@ struct ChatBarView: View {
             .padding(16)
             .offset(buttonOffset)
 
-            // Invisible drag region in the top bar (between Gemini text and PRO badge)
+            // Invisible drag region in the top bar (between title and sidebar)
             VStack {
                 HStack {
                     Spacer()
@@ -104,8 +104,8 @@ struct ChatBarView: View {
     }
 
     private enum Constants {
-        static let dragRegionLeading: CGFloat = 160  // skip past expand button + "Gemini" text
-        static let dragRegionTrailing: CGFloat = 120  // skip past PRO badge + avatar
+        static let dragRegionLeading: CGFloat = 160  // skip past expand button + header chrome
+        static let dragRegionTrailing: CGFloat = 120  // skip past account / actions
         static let dragRegionHeight: CGFloat = 38
         static let dragRegionTopPadding: CGFloat = 16
     }

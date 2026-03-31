@@ -1,6 +1,6 @@
 //
-//  GeminiDesktopApp.swift
-//  GeminiDesktop
+//  ClaudeDesktopApp.swift
+//  ClaudeDesktop
 //
 //  Created by alexcding on 2025-12-13.
 //
@@ -17,7 +17,7 @@ extension KeyboardShortcuts.Name {
 
 // MARK: - Main App
 @main
-struct GeminiDesktopApp: App {
+struct ClaudeDesktopApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @State var coordinator = AppCoordinator()
     @Environment(\.openWindow) private var openWindow
@@ -119,7 +119,11 @@ struct GeminiDesktopApp: App {
         MenuBarExtra {
             MenuBarView(coordinator: $coordinator)
         } label: {
-            Image(systemName: Constants.menuBarIcon)
+            Image("MenuBarPathMonochrome")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 18, height: 18)
                 .onAppear {
                     let hideWindowAtLaunch = UserDefaults.standard.bool(forKey: UserDefaultsKeys.hideWindowAtLaunch.rawValue)
                     let hideDockIcon = UserDefaults.standard.bool(forKey: UserDefaultsKeys.hideDockIcon.rawValue)
@@ -154,7 +158,7 @@ struct GeminiDesktopApp: App {
 }
 
 // MARK: - Constants
-extension GeminiDesktopApp {
+extension ClaudeDesktopApp {
     struct Constants {
         // Main Window
         static let mainWindowMinWidth: CGFloat = 400
@@ -176,7 +180,7 @@ extension GeminiDesktopApp {
                 return NSColor(red: 238.0/255.0, green: 241.0/255.0, blue: 247.0/255.0, alpha: 1.0)
             }
         }
-        static let menuBarIcon = "sparkle"
+        static let menuBarIcon = "bubble.left.and.bubble.right"
 
         // Timing
         static let hideWindowDelay: TimeInterval = 0.1

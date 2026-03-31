@@ -1,15 +1,15 @@
 #!/bin/bash
 
-# Create DMG for Gemini Desktop
+# Create DMG for Claude Desktop
 # Usage: ./scripts/create-dmg.sh
 
 set -e
 
-APP_NAME="Gemini Desktop"
-APP_PATH="$HOME/Downloads/GeminiDesktop/${APP_NAME}.app"
-OUTPUT_DIR="$HOME/Downloads/GeminiDesktop"
-DMG_FINAL="${OUTPUT_DIR}/GeminiDesktop.dmg"
-VOLUME_NAME="Gemini Desktop"
+APP_NAME="Claude Desktop"
+APP_PATH="$HOME/Downloads/ClaudeDesktop/${APP_NAME}.app"
+OUTPUT_DIR="$HOME/Downloads/ClaudeDesktop"
+DMG_FINAL="${OUTPUT_DIR}/ClaudeDesktop.dmg"
+VOLUME_NAME="Claude Desktop"
 
 echo "Creating DMG for ${APP_NAME}..."
 
