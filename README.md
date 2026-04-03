@@ -78,3 +78,6 @@ cd gemini-desktop-mac
 open ClaudeDesktop.xcodeproj
 # Build and run in Xcode
 ```
+
+# Acknowledgments
+- This project is using the same code as [Gemini Desktop](https://github.com/alexcding/gemini-desktop-mac?tab=License-1-ov-file#readme)
