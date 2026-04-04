@@ -1,13 +1,15 @@
 #!/bin/bash
 
 # Create DMG for Claude Desktop
-# Usage: ./scripts/create-dmg.sh
+# Usage: ./scripts/create-dmg.sh [path/to/Claude Desktop.app] [output_dir]
+# Defaults: ~/Downloads/ClaudeDesktop for both app parent and DMG output
 
 set -e
 
 APP_NAME="Claude Desktop"
-APP_PATH="$HOME/Downloads/ClaudeDesktop/${APP_NAME}.app"
-OUTPUT_DIR="$HOME/Downloads/ClaudeDesktop"
+DEFAULT_DIR="$HOME/Downloads/ClaudeDesktop"
+APP_PATH="${1:-$DEFAULT_DIR/${APP_NAME}.app}"
+OUTPUT_DIR="${2:-$DEFAULT_DIR}"
 DMG_FINAL="${OUTPUT_DIR}/ClaudeDesktop.dmg"
 VOLUME_NAME="Claude Desktop"
 

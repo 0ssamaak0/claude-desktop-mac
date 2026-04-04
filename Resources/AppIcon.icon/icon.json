@@ -6,11 +6,10 @@
     {
       "layers" : [
         {
-          "glass" : true,
-          "image-name" : "Path.png",
-          "name" : "Path",
+          "image-name" : "Claude_AI_symbol.svg",
+          "name" : "Claude_AI_symbol",
           "position" : {
-            "scale" : 0.8,
+            "scale" : 0.7,
             "translation-in-points" : [
               0,
               0

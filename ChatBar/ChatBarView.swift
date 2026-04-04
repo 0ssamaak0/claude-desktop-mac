@@ -71,7 +71,7 @@ struct ChatBarView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        ZStack(alignment: .topTrailing) {
             ClaudeWebView(webView: webView)
 
             // Expand button
@@ -85,7 +85,6 @@ struct ChatBarView: View {
             }
             .buttonStyle(.plain)
             .padding(16)
-            .offset(buttonOffset)
 
             // Invisible drag region in the top bar (between title and sidebar)
             VStack {
@@ -104,8 +103,8 @@ struct ChatBarView: View {
     }
 
     private enum Constants {
-        static let dragRegionLeading: CGFloat = 160  // skip past expand button + header chrome
-        static let dragRegionTrailing: CGFloat = 120  // skip past account / actions
+        static let dragRegionLeading: CGFloat = 80   // skip past header chrome
+        static let dragRegionTrailing: CGFloat = 160 // skip past expand button + account / actions
         static let dragRegionHeight: CGFloat = 38
         static let dragRegionTopPadding: CGFloat = 16
     }

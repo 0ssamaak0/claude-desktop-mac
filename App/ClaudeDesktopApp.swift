@@ -38,6 +38,13 @@ struct ClaudeDesktopApp: App {
                     Label("New Chat", systemImage: "plus")
                 }
                 .keyboardShortcut("n", modifiers: .command)
+
+                Button {
+                    coordinator.openNewProject()
+                } label: {
+                    Label("New Project", systemImage: "folder.badge.plus")
+                }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
             }
 
             CommandGroup(after: .toolbar) {

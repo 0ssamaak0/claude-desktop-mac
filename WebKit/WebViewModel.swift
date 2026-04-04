@@ -5,6 +5,7 @@
 //  Created by alexcding on 2025-12-15.
 //
 
+import AppKit
 import WebKit
 import Combine
 
@@ -30,6 +31,7 @@ class WebViewModel {
     private static var userAgent: String { UserAgentOption.currentUserAgentString }
     private static let minZoom: Double = 0.6
     private static let maxZoom: Double = 1.4
+    private static let inactivityTimeout: TimeInterval = 10 * 60 // 10 minutes
 
     // MARK: - Public Properties
 
@@ -46,6 +48,8 @@ class WebViewModel {
     private var urlObserver: NSKeyValueObservation?
     private var loadingObserver: NSKeyValueObservation?
     private let consoleLogHandler = ConsoleLogHandler()
+    private var inactivityTimer: Timer?
+    private(set) var isSuspended: Bool = false
 
     // MARK: - Initialization
 
@@ -53,6 +57,7 @@ class WebViewModel {
         self.wkWebView = Self.createWebView(consoleLogHandler: consoleLogHandler)
         setupObservers()
         loadHome()
+        resetInactivityTimer()
     }
 
     // MARK: - Navigation
@@ -77,8 +82,74 @@ class WebViewModel {
     }
 
     func openNewChat() {
-        let url = URL(string: "https://claude.ai/new")!
-        wkWebView.load(URLRequest(url: url))
+        let script = """
+        (function() {
+            const event = new KeyboardEvent('keydown', {
+                key: 'o',
+                code: 'KeyO',
+                keyCode: 79,
+                which: 79,
+                shiftKey: true,
+                metaKey: true,
+                bubbles: true,
+                cancelable: true,
+                composed: true
+            });
+            document.activeElement.dispatchEvent(event);
+            document.dispatchEvent(event);
+        })();
+        """
+        wkWebView.evaluateJavaScript(script, completionHandler: nil)
+    }
+
+    func openNewProject() {
+        let script = """
+        (function() {
+            const event = new KeyboardEvent('keydown', {
+                key: 'i',
+                code: 'KeyI',
+                keyCode: 73,
+                which: 73,
+                shiftKey: true,
+                metaKey: true,
+                bubbles: true,
+                cancelable: true,
+                composed: true
+            });
+            document.activeElement.dispatchEvent(event);
+            document.dispatchEvent(event);
+        })();
+        """
+        wkWebView.evaluateJavaScript(script, completionHandler: nil)
+    }
+
+    // MARK: - Inactivity Suspension
+
+    func resetInactivityTimer() {
+        inactivityTimer?.invalidate()
+        inactivityTimer = Timer.scheduledTimer(withTimeInterval: Self.inactivityTimeout, repeats: false) { [weak self] _ in
+            DispatchQueue.main.async { self?.suspendIfInactive() }
+        }
+    }
+
+    private func suspendIfInactive() {
+        guard !isSuspended else { return }
+        // Don't suspend while any regular app window is visible to the user.
+        // Exclude menu bar extra windows (they sit at statusBar level and above,
+        // and are always "visible" even when the app is hidden).
+        if NSApp.windows.contains(where: { $0.isVisible && !$0.isMiniaturized && $0.level <= .floating }) {
+            resetInactivityTimer()
+            return
+        }
+        isSuspended = true
+        wkWebView.load(URLRequest(url: URL(string: "about:blank")!))
+    }
+
+    func resumeIfSuspended() {
+        resetInactivityTimer()
+        guard isSuspended else { return }
+        isSuspended = false
+        loadHome()
     }
 
     // MARK: - Zoom
@@ -162,6 +233,11 @@ class WebViewModel {
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 guard let currentURL = webView.url else { return }
+
+                // Reset inactivity timer on real navigation, not on the suspend blank load
+                if currentURL.absoluteString != "about:blank" && !self.isSuspended {
+                    self.resetInactivityTimer()
+                }
 
                 let onClaudeHomeSurface = Self.isClaudeHomeSurface(currentURL)
 
