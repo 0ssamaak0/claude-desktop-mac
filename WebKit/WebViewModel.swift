@@ -123,6 +123,51 @@ class WebViewModel {
         wkWebView.evaluateJavaScript(script, completionHandler: nil)
     }
 
+    /// Inserts text into the Claude composer (ProseMirror contenteditable).
+    /// Retries for a short window so it works even while the page is still loading.
+    func insertTextIntoComposer(_ text: String) {
+        guard let payload = try? JSONSerialization.data(withJSONObject: [text]),
+              let jsonArray = String(data: payload, encoding: .utf8) else { return }
+
+        let script = """
+        (function(payload) {
+            const text = payload[0];
+            const MAX_TRIES = 40;
+            const INTERVAL_MS = 75;
+            let tries = 0;
+
+            function findEditor() {
+                return document.querySelector('div.ProseMirror[contenteditable="true"]')
+                    || document.querySelector('div[contenteditable="true"]');
+            }
+
+            function attempt() {
+                const editor = findEditor();
+                if (!editor) {
+                    if (++tries < MAX_TRIES) setTimeout(attempt, INTERVAL_MS);
+                    return;
+                }
+                editor.focus();
+                try {
+                    const dt = new DataTransfer();
+                    dt.setData('text/plain', text);
+                    const evt = new ClipboardEvent('paste', {
+                        bubbles: true, cancelable: true, clipboardData: dt
+                    });
+                    const delivered = editor.dispatchEvent(evt);
+                    if (delivered && !evt.defaultPrevented) {
+                        document.execCommand('insertText', false, text);
+                    }
+                } catch (e) {
+                    document.execCommand('insertText', false, text);
+                }
+            }
+            attempt();
+        })(\(jsonArray));
+        """
+        wkWebView.evaluateJavaScript(script, completionHandler: nil)
+    }
+
     // MARK: - Inactivity Suspension
 
     func resetInactivityTimer() {
