@@ -56,23 +56,12 @@ class WindowDragNSView: NSView {
 }
 
 struct ChatBarView: View {
-    let webView: WKWebView
+    let webViewModel: WebViewModel
     let onExpandToMain: () -> Void
-
-    /// Calculate button offset based on screen height
-    /// MacBook Air 13" (~900pt): (-6, -2), 1080p (1080pt): (-4, 0)
-    private var buttonOffset: CGSize {
-        let screenHeight = NSScreen.main?.frame.height ?? 900
-        // Interpolate: 900pt -> (-6, -2), 1080pt -> (-4, 0)
-        let t = (screenHeight - 900) / 180  // 0 at 900pt, 1 at 1080pt
-        let xOffset = -6.0 + t * 2.0
-        let yOffset = -2.0 + t * 2.0
-        return CGSize(width: xOffset, height: yOffset)
-    }
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            ClaudeWebView(webView: webView)
+            ClaudeWebView(webView: webViewModel.wkWebView)
 
             // Expand button
             Button(action: onExpandToMain) {

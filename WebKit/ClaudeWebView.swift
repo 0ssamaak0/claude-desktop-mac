@@ -16,7 +16,11 @@ struct ClaudeWebView: NSViewRepresentable {
         return container
     }
 
-    func updateNSView(_ container: WebViewContainer, context: Context) {}
+    func updateNSView(_ container: WebViewContainer, context: Context) {
+        if container.webView !== webView {
+            container.swapWebView(to: webView)
+        }
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -150,7 +154,7 @@ struct ClaudeWebView: NSViewRepresentable {
 }
 
 class WebViewContainer: NSView {
-    let webView: WKWebView
+    private(set) var webView: WKWebView
     let coordinator: ClaudeWebView.Coordinator
     private var windowObserver: NSObjectProtocol?
 
@@ -159,7 +163,6 @@ class WebViewContainer: NSView {
         self.coordinator = coordinator
         super.init(frame: .zero)
         autoresizesSubviews = true
-        setupWindowObserver()
     }
 
     required init?(coder: NSCoder) {
@@ -172,22 +175,41 @@ class WebViewContainer: NSView {
         }
     }
 
-    private func setupWindowObserver() {
-        windowObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.didBecomeKeyNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let self = self,
-                  let keyWindow = notification.object as? NSWindow,
-                  self.window === keyWindow else { return }
-            self.attachWebView()
+    /// Swaps the underlying webview. Used when WebViewModel rebuilds its
+    /// WKWebView (e.g. on resume from inactivity suspension).
+    func swapWebView(to newWebView: WKWebView) {
+        guard webView !== newWebView else { return }
+        if webView.superview === self {
+            webView.removeFromSuperview()
+        }
+        webView = newWebView
+        if window != nil {
+            attachWebView()
         }
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window != nil && window?.isKeyWindow == true {
+
+        // Replace any prior observer with one scoped to the current window.
+        // Previously this used `object: nil`, which fired for every key-window
+        // change anywhere in the app.
+        if let observer = windowObserver {
+            NotificationCenter.default.removeObserver(observer)
+            windowObserver = nil
+        }
+
+        guard let window = window else { return }
+
+        windowObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            self?.attachWebView()
+        }
+
+        if window.isKeyWindow {
             attachWebView()
         }
     }

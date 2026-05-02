@@ -87,13 +87,13 @@ class AppCoordinator {
         }
 
         let contentView = ChatBarView(
-            webView: webViewModel.wkWebView,
+            webViewModel: webViewModel,
             onExpandToMain: { [weak self] in
                 self?.expandToMainWindow()
             }
         )
         let hostingView = NSHostingView(rootView: contentView)
-        let bar = ChatBarPanel(contentView: hostingView)
+        let bar = ChatBarPanel(contentView: hostingView, webViewModel: webViewModel)
 
         // Position based on setting
         positionChatBar(bar, position: position)

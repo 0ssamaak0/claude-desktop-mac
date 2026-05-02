@@ -33,45 +33,17 @@ class ChatBarPanel: NSPanel, NSWindowDelegate {
     }
 
     private var isExpanded = false
-    private var pollingTimer: Timer?
     private var positionSaveWork: DispatchWorkItem?
-    private weak var webView: WKWebView?
+    private var sizeSaveWork: DispatchWorkItem?
+    private weak var webViewModel: WebViewModel?
 
-    // Returns true if in a conversation (not on start page)
-    private let checkConversationScript = """
-        (function() {
-            if (document.querySelector('[data-testid="conversation-turn"]') != null) { return true; }
-            if (document.querySelector('[data-is-streaming="true"]') != null) { return true; }
-            const main = document.querySelector('main');
-            if (!main) { return false; }
-            const articles = main.querySelectorAll('article, [data-turn], [class*="Message"]');
-            if (articles.length >= 2) { return true; }
-            const rows = main.querySelectorAll('[class*="message"], [class*="MessageRow"]');
-            return rows.length >= 2;
-        })();
-        """
-
-    // JavaScript to focus the input field
-    private let focusInputScript = """
-        (function() {
-            const input = document.querySelector('div[contenteditable="true"][data-placeholder]') ||
-                          document.querySelector('textarea[placeholder*="Message"]') ||
-                          document.querySelector('textarea[placeholder*="Reply"]') ||
-                          document.querySelector('[contenteditable="true"]') ||
-                          document.querySelector('textarea');
-            if (input) {
-                input.focus();
-                return true;
-            }
-            return false;
-        })();
-        """
-
-    init(contentView: NSView) {
+    init(contentView: NSView, webViewModel: WebViewModel) {
         let width = UserDefaults.standard.double(forKey: UserDefaultsKeys.panelWidth.rawValue)
         let height = UserDefaults.standard.double(forKey: UserDefaultsKeys.panelHeight.rawValue)
         let initWidth = width > 0 ? width : Constants.defaultWidth
         let initHeight = height > 0 ? height : Constants.defaultHeight
+
+        self.webViewModel = webViewModel
 
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: initWidth, height: initHeight),
@@ -90,21 +62,9 @@ class ChatBarPanel: NSPanel, NSWindowDelegate {
         configureWindow()
         configureAppearance()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + Constants.webViewSearchDelay) { [weak self] in
-            guard let self = self, let content = self.contentView else { return }
-            self.findWebView(in: content)
-            print("[ChatBar] WebView found: \(self.webView != nil)")
-            self.startPolling()
-        }
-    }
-
-    private func findWebView(in view: NSView) {
-        if let wk = view as? WKWebView {
-            self.webView = wk
-            return
-        }
-        for subview in view.subviews {
-            findWebView(in: subview)
+        // Replace the 1Hz JS poll with a push from the page's MutationObserver.
+        webViewModel.onConversationStarted = { [weak self] in
+            self?.expandToNormalSize()
         }
     }
 
@@ -120,7 +80,6 @@ class ChatBarPanel: NSPanel, NSWindowDelegate {
         minSize = NSSize(width: Constants.minWidth, height: Constants.minHeight)
         maxSize = NSSize(width: Constants.maxWidth, height: Constants.maxHeight)
 
-        // Add global click monitor to dismiss when clicking outside
         setupClickOutsideMonitor()
     }
 
@@ -147,31 +106,9 @@ class ChatBarPanel: NSPanel, NSWindowDelegate {
         }
     }
 
-    private func startPolling() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + Constants.initialPollingDelay) { [weak self] in
-            self?.pollingTimer = Timer.scheduledTimer(withTimeInterval: Constants.pollingInterval, repeats: true) { [weak self] _ in
-                self?.checkForConversation()
-            }
-        }
-    }
-
-    private func checkForConversation() {
-        guard !isExpanded else { return }
-        guard let webView = webView else { return }
-
-        webView.evaluateJavaScript(checkConversationScript) { [weak self] result, _ in
-            if let inConversation = result as? Bool, inConversation {
-                DispatchQueue.main.async {
-                    self?.expandToNormalSize()
-                }
-            }
-        }
-    }
-
     private func expandToNormalSize() {
         guard !isExpanded else { return }
         isExpanded = true
-        pollingTimer?.invalidate()
 
         let currentFrame = self.frame
 
@@ -179,7 +116,7 @@ class ChatBarPanel: NSPanel, NSWindowDelegate {
         guard let screen = currentScreen else { return }
         let visibleFrame = screen.visibleFrame
         let maxAvailableHeight = visibleFrame.maxY - currentFrame.origin.y
-        
+
         // Use the smaller of expandedHeight and available space, with some padding
         let targetHeight = min(self.expandedHeight, maxAvailableHeight - Constants.topPadding)
         let clampedHeight = max(targetHeight, initialSize.height) // Don't shrink below initial size
@@ -200,7 +137,6 @@ class ChatBarPanel: NSPanel, NSWindowDelegate {
 
     func resetToInitialSize() {
         isExpanded = false
-        pollingTimer?.invalidate()
 
         let currentFrame = frame
 
@@ -210,44 +146,23 @@ class ChatBarPanel: NSPanel, NSWindowDelegate {
             width: currentFrame.width,
             height: initialSize.height
         ), display: true)
-
-        startPolling()
     }
 
     /// Called when panel is shown - check if we should be expanded or initial size
     func checkAndAdjustSize() {
-        guard let webView = webView else { return }
+        webViewModel?.focusComposer()
 
-        // Focus the input field
-        focusInput()
-
-        webView.evaluateJavaScript(checkConversationScript) { [weak self] result, _ in
-            guard let self = self else { return }
-            DispatchQueue.main.async {
-                if let inConversation = result as? Bool, inConversation {
-                    // In conversation - ensure expanded
-                    if !self.isExpanded {
-                        self.expandToNormalSize()
-                    }
-                } else {
-                    // On start page - ensure initial size
-                    if self.isExpanded {
-                        self.resetToInitialSize()
-                    }
-                }
-            }
+        let inConversation = webViewModel?.isInConversation ?? false
+        if inConversation {
+            if !isExpanded { expandToNormalSize() }
+        } else {
+            if isExpanded { resetToInitialSize() }
         }
     }
 
-    /// Focus the input field in the WebView
-    func focusInput() {
-        guard let webView = webView else { return }
-        webView.evaluateJavaScript(focusInputScript, completionHandler: nil)
-    }
-
     deinit {
-        pollingTimer?.invalidate()
         positionSaveWork?.cancel()
+        sizeSaveWork?.cancel()
         if let monitor = clickOutsideMonitor {
             NSEvent.removeMonitor(monitor)
         }
@@ -259,8 +174,15 @@ class ChatBarPanel: NSPanel, NSWindowDelegate {
         // Only persist size when in initial (non-expanded) state
         guard !isExpanded else { return }
 
-        UserDefaults.standard.set(frame.width, forKey: UserDefaultsKeys.panelWidth.rawValue)
-        UserDefaults.standard.set(frame.height, forKey: UserDefaultsKeys.panelHeight.rawValue)
+        // Debounce: a single drag fires dozens of resize events.
+        sizeSaveWork?.cancel()
+        let size = frame.size
+        let work = DispatchWorkItem {
+            UserDefaults.standard.set(size.width, forKey: UserDefaultsKeys.panelWidth.rawValue)
+            UserDefaults.standard.set(size.height, forKey: UserDefaultsKeys.panelHeight.rawValue)
+        }
+        sizeSaveWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Constants.sizeSaveDebounce, execute: work)
     }
 
     func windowDidMove(_ notification: Notification) {
@@ -295,7 +217,7 @@ class ChatBarPanel: NSPanel, NSWindowDelegate {
     }
 
     private func openNewChat() {
-        guard let webView = webView else { return }
+        guard let webView = webViewModel?.wkWebView else { return }
         if let url = URL(string: "https://claude.ai/new") {
             webView.load(URLRequest(url: url))
         }
@@ -320,10 +242,8 @@ extension ChatBarPanel {
         static let borderWidth: CGFloat = 0.5
         static let expandedScreenRatio: CGFloat = 0.7
         static let animationDuration: Double = 0.3
-        static let pollingInterval: TimeInterval = 1.0
-        static let initialPollingDelay: TimeInterval = 3.0
-        static let webViewSearchDelay: TimeInterval = 0.5
         static let topPadding: CGFloat = 20 // Padding from the top of the screen
         static let positionSaveDebounce: TimeInterval = 0.3
+        static let sizeSaveDebounce: TimeInterval = 0.3
     }
 }

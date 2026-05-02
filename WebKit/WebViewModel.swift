@@ -18,6 +18,19 @@ class ConsoleLogHandler: NSObject, WKScriptMessageHandler {
     }
 }
 
+/// Handles MutationObserver-driven conversation state pushes from the page
+final class ConversationStateHandler: NSObject, WKScriptMessageHandler {
+    weak var model: WebViewModel?
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard let body = message.body as? [String: Any],
+              let inConversation = body["inConversation"] as? Bool else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.model?.handleConversationState(inConversation)
+        }
+    }
+}
+
 /// Observable wrapper around WKWebView for the Claude web app
 @Observable
 class WebViewModel {
@@ -35,11 +48,17 @@ class WebViewModel {
 
     // MARK: - Public Properties
 
-    let wkWebView: WKWebView
+    /// The active web view. Reassigned on suspend/resume so that the WebContent
+    /// process is fully released while the user is idle.
+    private(set) var wkWebView: WKWebView
     private(set) var canGoBack: Bool = false
     private(set) var canGoForward: Bool = false
     private(set) var isAtHome: Bool = true
     private(set) var isLoading: Bool = true
+    private(set) var isInConversation: Bool = false
+
+    /// Called once when the page transitions from start-page → in-conversation.
+    var onConversationStarted: (() -> Void)?
 
     // MARK: - Private Properties
 
@@ -48,13 +67,18 @@ class WebViewModel {
     private var urlObserver: NSKeyValueObservation?
     private var loadingObserver: NSKeyValueObservation?
     private let consoleLogHandler = ConsoleLogHandler()
+    private let conversationStateHandler = ConversationStateHandler()
     private var inactivityTimer: Timer?
     private(set) var isSuspended: Bool = false
 
     // MARK: - Initialization
 
     init() {
-        self.wkWebView = Self.createWebView(consoleLogHandler: consoleLogHandler)
+        self.wkWebView = Self.createFullWebView(
+            consoleLogHandler: consoleLogHandler,
+            conversationStateHandler: conversationStateHandler
+        )
+        conversationStateHandler.model = self
         setupObservers()
         loadHome()
         resetInactivityTimer()
@@ -168,6 +192,31 @@ class WebViewModel {
         wkWebView.evaluateJavaScript(script, completionHandler: nil)
     }
 
+    /// Focuses the page's primary input field. Used by the chat bar on appearance.
+    func focusComposer() {
+        let script = """
+        (function() {
+            const input = document.querySelector('div[contenteditable="true"][data-placeholder]') ||
+                          document.querySelector('textarea[placeholder*="Message"]') ||
+                          document.querySelector('textarea[placeholder*="Reply"]') ||
+                          document.querySelector('[contenteditable="true"]') ||
+                          document.querySelector('textarea');
+            if (input) { input.focus(); }
+        })();
+        """
+        wkWebView.evaluateJavaScript(script, completionHandler: nil)
+    }
+
+    // MARK: - Conversation State (push from JS)
+
+    func handleConversationState(_ inConversation: Bool) {
+        let wasInConversation = isInConversation
+        isInConversation = inConversation
+        if !wasInConversation && inConversation {
+            onConversationStarted?()
+        }
+    }
+
     // MARK: - Inactivity Suspension
 
     func resetInactivityTimer() {
@@ -187,13 +236,31 @@ class WebViewModel {
             return
         }
         isSuspended = true
-        wkWebView.load(URLRequest(url: URL(string: "about:blank")!))
+        // Tear down the WebContent process by replacing the WKWebView with a
+        // minimal, unloaded instance. The previous instance (and its process)
+        // is released as soon as no view holds it — and since suspension only
+        // fires when no app windows are visible, no view does.
+        teardownObservers()
+        wkWebView.stopLoading()
+        wkWebView.navigationDelegate = nil
+        wkWebView.uiDelegate = nil
+        wkWebView = Self.createIdleWebView()
+        canGoBack = false
+        canGoForward = false
+        isAtHome = true
+        isLoading = false
+        isInConversation = false
     }
 
     func resumeIfSuspended() {
         resetInactivityTimer()
         guard isSuspended else { return }
         isSuspended = false
+        wkWebView = Self.createFullWebView(
+            consoleLogHandler: consoleLogHandler,
+            conversationStateHandler: conversationStateHandler
+        )
+        setupObservers()
         loadHome()
     }
 
@@ -227,7 +294,11 @@ class WebViewModel {
 
     // MARK: - Private Setup
 
-    private static func createWebView(consoleLogHandler: ConsoleLogHandler) -> WKWebView {
+    /// Builds a fully configured WKWebView with scripts, handlers, and saved zoom.
+    private static func createFullWebView(
+        consoleLogHandler: ConsoleLogHandler,
+        conversationStateHandler: ConversationStateHandler
+    ) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -236,6 +307,8 @@ class WebViewModel {
         for script in UserScripts.createAllScripts() {
             configuration.userContentController.addUserScript(script)
         }
+
+        configuration.userContentController.add(conversationStateHandler, name: UserScripts.conversationStateHandler)
 
         #if DEBUG
         configuration.userContentController.add(consoleLogHandler, name: UserScripts.consoleLogHandler)
@@ -253,7 +326,28 @@ class WebViewModel {
         return webView
     }
 
+    /// Builds a minimal idle WKWebView used as a placeholder during suspension.
+    /// No scripts, no handlers, no loaded URL — its WebContent process stays unspawned.
+    private static func createIdleWebView() -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .default()
+        return WKWebView(frame: .zero, configuration: configuration)
+    }
+
+    private func teardownObservers() {
+        backObserver?.invalidate()
+        forwardObserver?.invalidate()
+        urlObserver?.invalidate()
+        loadingObserver?.invalidate()
+        backObserver = nil
+        forwardObserver = nil
+        urlObserver = nil
+        loadingObserver = nil
+    }
+
     private func setupObservers() {
+        teardownObservers()
+
         backObserver = wkWebView.observe(\.canGoBack, options: [.new, .initial]) { [weak self] webView, _ in
             DispatchQueue.main.async {
                 guard let self = self else { return }

@@ -13,10 +13,14 @@ enum UserScripts {
     /// Message handler name for console log bridging
     static let consoleLogHandler = "consoleLog"
 
+    /// Message handler name for conversation state push updates
+    static let conversationStateHandler = "conversationState"
+
     /// Creates all user scripts to be injected into the WebView
     static func createAllScripts() -> [WKUserScript] {
         var scripts: [WKUserScript] = [
-            createIMEFixScript()
+            createIMEFixScript(),
+            createConversationObserverScript()
         ]
 
         #if DEBUG
@@ -41,6 +45,16 @@ enum UserScripts {
         WKUserScript(
             source: imeFixSource,
             injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true
+        )
+    }
+
+    /// Creates a MutationObserver-based script that pushes conversation
+    /// state changes to native code (replaces a 1Hz JS poll).
+    private static func createConversationObserverScript() -> WKUserScript {
+        WKUserScript(
+            source: conversationObserverSource,
+            injectionTime: .atDocumentStart,
             forMainFrameOnly: true
         )
     }
@@ -113,6 +127,63 @@ enum UserScripts {
                 e.preventDefault();
             }
         }, true);
+    })();
+    """
+
+    /// Pushes conversation state to native via MutationObserver instead of polling.
+    /// Posts `{ inConversation: Bool }` only when state transitions.
+    private static let conversationObserverSource = """
+    (function() {
+        'use strict';
+        let lastState = null;
+        let scheduled = false;
+
+        function isInConv() {
+            if (document.querySelector('[data-testid="conversation-turn"]')) return true;
+            if (document.querySelector('[data-is-streaming="true"]')) return true;
+            const main = document.querySelector('main');
+            if (!main) return false;
+            const articles = main.querySelectorAll('article, [data-turn], [class*="Message"]');
+            if (articles.length >= 2) return true;
+            const rows = main.querySelectorAll('[class*="message"], [class*="MessageRow"]');
+            return rows.length >= 2;
+        }
+
+        function publish() {
+            const state = isInConv();
+            if (state === lastState) return;
+            lastState = state;
+            try {
+                window.webkit.messageHandlers.\(conversationStateHandler).postMessage({ inConversation: state });
+            } catch (e) {}
+        }
+
+        function schedule() {
+            if (scheduled) return;
+            scheduled = true;
+            setTimeout(function() { scheduled = false; publish(); }, 100);
+        }
+
+        const observer = new MutationObserver(schedule);
+
+        function start() {
+            if (!document.body) return;
+            observer.observe(document.body, { childList: true, subtree: true });
+            publish();
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', start, { once: true });
+        } else {
+            start();
+        }
+
+        // SPA navigations don't reload the page; re-check on history changes.
+        const origPush = history.pushState;
+        const origReplace = history.replaceState;
+        history.pushState = function() { origPush.apply(this, arguments); schedule(); };
+        history.replaceState = function() { origReplace.apply(this, arguments); schedule(); };
+        window.addEventListener('popstate', schedule);
     })();
     """
 }
