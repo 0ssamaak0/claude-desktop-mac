@@ -77,6 +77,13 @@ class AppCoordinator {
         toolbar.autosavesConfiguration = true
         window.toolbar = toolbar
         window.toolbarStyle = .unified
+
+        // Float the toolbar pills over the WebView (Tahoe Liquid Glass).
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.titlebarSeparatorStyle = .none
+        window.styleMask.insert(.fullSizeContentView)
+
         mainToolbarDelegate = delegate
     }
 
@@ -325,7 +332,19 @@ final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSToolbarItemValid
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.cdBack, .cdNewChat, .cdProjects, .cdSidebar, .cdSearch, .flexibleSpace, .cdChatBar, .cdGear]
+        // Spacers between groups break the single fused capsule into separate
+        // Liquid Glass pills (Tahoe behavior).
+        [
+            .cdBack,
+            .space,
+            .cdNewChat, .cdProjects,
+            .space,
+            .cdSidebar, .cdSearch,
+            .flexibleSpace,
+            .cdChatBar,
+            .space,
+            .cdGear
+        ]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {

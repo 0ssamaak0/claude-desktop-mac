@@ -23,6 +23,7 @@ struct MainWindowView: View {
                     .background(.background)
             }
         }
+            .ignoresSafeArea()
             .background(WindowAccessor { window in
                 coordinator.attachMainToolbar(to: window)
             })
