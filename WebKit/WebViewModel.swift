@@ -38,6 +38,7 @@ class WebViewModel {
     // MARK: - Constants
 
     static let claudeHomeURL = URL(string: "https://claude.ai/new")!
+    static let claudeProjectsURL = URL(string: "https://claude.ai/projects")!
     static let defaultPageZoom: Double = 1.0
 
     private static let claudeHosts: Set<String> = ["claude.ai", "www.claude.ai"]
@@ -92,6 +93,11 @@ class WebViewModel {
         wkWebView.load(URLRequest(url: Self.claudeHomeURL))
     }
 
+    func loadProjects() {
+        isAtHome = false
+        wkWebView.load(URLRequest(url: Self.claudeProjectsURL))
+    }
+
     func goBack() {
         isAtHome = false
         wkWebView.goBack()
@@ -106,15 +112,34 @@ class WebViewModel {
     }
 
     func openNewChat() {
+        dispatchKeyboardShortcut(key: "o", code: "KeyO", keyCode: 79, shift: true, meta: true)
+    }
+
+    func openNewProject() {
+        dispatchKeyboardShortcut(key: "i", code: "KeyI", keyCode: 73, shift: true, meta: true)
+    }
+
+    /// Toggles Claude.ai's left sidebar by dispatching its in-page shortcut (Cmd+.).
+    func toggleSidebar() {
+        dispatchKeyboardShortcut(key: ".", code: "Period", keyCode: 190, shift: false, meta: true)
+    }
+
+    /// Opens Claude.ai's website settings panel by dispatching its in-page shortcut (Shift+Cmd+,).
+    func openClaudeSettings() {
+        dispatchKeyboardShortcut(key: ",", code: "Comma", keyCode: 188, shift: true, meta: true)
+    }
+
+    /// Dispatches a synthetic keydown event into the page so Claude.ai's own shortcut handlers fire.
+    private func dispatchKeyboardShortcut(key: String, code: String, keyCode: Int, shift: Bool, meta: Bool) {
         let script = """
         (function() {
             const event = new KeyboardEvent('keydown', {
-                key: 'o',
-                code: 'KeyO',
-                keyCode: 79,
-                which: 79,
-                shiftKey: true,
-                metaKey: true,
+                key: \(jsString(key)),
+                code: \(jsString(code)),
+                keyCode: \(keyCode),
+                which: \(keyCode),
+                shiftKey: \(shift ? "true" : "false"),
+                metaKey: \(meta ? "true" : "false"),
                 bubbles: true,
                 cancelable: true,
                 composed: true
@@ -126,25 +151,24 @@ class WebViewModel {
         wkWebView.evaluateJavaScript(script, completionHandler: nil)
     }
 
-    func openNewProject() {
-        let script = """
-        (function() {
-            const event = new KeyboardEvent('keydown', {
-                key: 'i',
-                code: 'KeyI',
-                keyCode: 73,
-                which: 73,
-                shiftKey: true,
-                metaKey: true,
-                bubbles: true,
-                cancelable: true,
-                composed: true
-            });
-            document.activeElement.dispatchEvent(event);
-            document.dispatchEvent(event);
-        })();
-        """
-        wkWebView.evaluateJavaScript(script, completionHandler: nil)
+    /// JSON-encodes a string for safe interpolation into a JS source literal.
+    private func jsString(_ value: String) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: [value]),
+              let json = String(data: data, encoding: .utf8) else { return "\"\"" }
+        return String(json.dropFirst().dropLast())
+    }
+
+    // MARK: - Find in page
+
+    func findInPage(_ query: String, forward: Bool, completion: @escaping (Bool) -> Void) {
+        guard !query.isEmpty else { completion(false); return }
+        let configuration = WKFindConfiguration()
+        configuration.backwards = !forward
+        configuration.caseSensitive = false
+        configuration.wraps = true
+        wkWebView.find(query, configuration: configuration) { result in
+            completion(result.matchFound)
+        }
     }
 
     /// Inserts text into the Claude composer (ProseMirror contenteditable).

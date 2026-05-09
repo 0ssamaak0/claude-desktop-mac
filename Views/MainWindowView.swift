@@ -23,45 +23,39 @@ struct MainWindowView: View {
                     .background(.background)
             }
         }
+            .background(WindowAccessor { window in
+                coordinator.attachMainToolbar(to: window)
+            })
             .onAppear {
                 coordinator.openWindowAction = { id in
                     openWindow(id: id)
                 }
             }
-            .toolbar {
-                if coordinator.canGoBack {
-                    ToolbarItem(placement: .navigation) {
-                        Button {
-                            coordinator.goBack()
-                        } label: {
-                            Image(systemName: "chevron.left")
-                        }
-                        .help("Back")
-                    }
-                }
+    }
+}
 
-                ToolbarItem(placement: .principal) {
-                    Spacer()
-                }
+/// A zero-size NSViewRepresentable that delivers its hosting NSWindow to a
+/// callback as soon as the view is attached to one. Used to wire up the
+/// custom NSToolbar without polling NSApp.windows.
+private struct WindowAccessor: NSViewRepresentable {
+    let onAttach: (NSWindow) -> Void
 
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        minimizeToPrompt()
-                    } label: {
-                        Image(systemName: "arrow.down.right.and.arrow.up.left")
-                    }
-                    .help("Minimize to Prompt Panel")
-                }
-            }
+    func makeNSView(context: Context) -> NSView {
+        let view = WindowAwareView()
+        view.onAttach = onAttach
+        return view
     }
 
-    private func minimizeToPrompt() {
-        // Close main window and show chat bar
-        if let window = NSApp.windows.first(where: { $0.identifier?.rawValue == AppCoordinator.Constants.mainWindowIdentifier || $0.title == AppCoordinator.Constants.mainWindowTitle }) {
-            if !(window is NSPanel) {
-                window.orderOut(nil)
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private final class WindowAwareView: NSView {
+        var onAttach: ((NSWindow) -> Void)?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let window, !(window is NSPanel) {
+                onAttach?(window)
             }
         }
-        coordinator.showChatBar()
     }
 }

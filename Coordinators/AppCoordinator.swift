@@ -16,6 +16,7 @@ extension Notification.Name {
 @Observable
 class AppCoordinator {
     private var chatBar: ChatBarPanel?
+    private var mainToolbarDelegate: MainToolbarDelegate?
     var webViewModel = WebViewModel()
 
     var openWindowAction: ((String) -> Void)?
@@ -39,6 +40,45 @@ class AppCoordinator {
     func reload() { webViewModel.reload() }
     func openNewChat() { webViewModel.openNewChat() }
     func openNewProject() { webViewModel.openNewProject() }
+    func openProjects() { webViewModel.loadProjects() }
+    func toggleSidebar() { webViewModel.toggleSidebar() }
+    func openClaudeSettings() { webViewModel.openClaudeSettings() }
+
+    // MARK: - Find in page
+
+    func findInPage(_ query: String, forward: Bool, completion: @escaping (Bool) -> Void) {
+        webViewModel.findInPage(query, forward: forward, completion: completion)
+    }
+
+    /// Focuses the search field embedded in the toolbar (if the user kept it
+    /// visible) and expands it. Driven by the Cmd+F menu command.
+    func focusToolbarSearch() {
+        guard let toolbar = findMainWindow()?.toolbar,
+              let searchItem = toolbar.items.first(where: { $0.itemIdentifier == .cdSearch }) as? NSSearchToolbarItem else {
+            return
+        }
+        searchItem.beginSearchInteraction()
+    }
+
+    // MARK: - Toolbar
+
+    /// Attaches a custom NSToolbar with full customization support (real
+    /// Space / Flexible Space items, autosaved layout) to the given window.
+    /// Idempotent.
+    func attachMainToolbar(to window: NSWindow) {
+        if window.toolbar?.identifier == MainToolbarDelegate.toolbarIdentifier {
+            return
+        }
+        let delegate = MainToolbarDelegate(coordinator: self, window: window)
+        let toolbar = NSToolbar(identifier: MainToolbarDelegate.toolbarIdentifier)
+        toolbar.delegate = delegate
+        toolbar.displayMode = .iconOnly
+        toolbar.allowsUserCustomization = true
+        toolbar.autosavesConfiguration = true
+        window.toolbar = toolbar
+        window.toolbarStyle = .unified
+        mainToolbarDelegate = delegate
+    }
 
     // MARK: - Zoom
 
@@ -251,4 +291,157 @@ extension AppCoordinator {
         static let mainWindowTitle = "Claude Desktop"
     }
 
+}
+
+// MARK: - NSToolbar identifiers
+
+extension NSToolbarItem.Identifier {
+    static let cdBack = NSToolbarItem.Identifier("cd.back")
+    static let cdForward = NSToolbarItem.Identifier("cd.forward")
+    static let cdNewChat = NSToolbarItem.Identifier("cd.newChat")
+    static let cdNewProject = NSToolbarItem.Identifier("cd.newProject")
+    static let cdProjects = NSToolbarItem.Identifier("cd.projects")
+    static let cdSidebar = NSToolbarItem.Identifier("cd.sidebar")
+    static let cdSearch = NSToolbarItem.Identifier("cd.search")
+    static let cdAlwaysOnTop = NSToolbarItem.Identifier("cd.alwaysOnTop")
+    static let cdChatBar = NSToolbarItem.Identifier("cd.chatBar")
+    static let cdGear = NSToolbarItem.Identifier("cd.gear")
+}
+
+/// NSToolbarDelegate for the main window. Hosts a full set of customizable
+/// items plus the standard `.space` and `.flexibleSpace` so users can drop
+/// gaps anywhere in the toolbar and rearrange icons freely.
+final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSToolbarItemValidation {
+    static let toolbarIdentifier = "ClaudeDesktopMainToolbar"
+
+    private weak var coordinator: AppCoordinator?
+    private weak var hostWindow: NSWindow?
+    private var lastPinnedState: Bool?
+
+    init(coordinator: AppCoordinator, window: NSWindow) {
+        self.coordinator = coordinator
+        self.hostWindow = window
+        super.init()
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [.cdBack, .cdNewChat, .cdProjects, .cdSidebar, .cdSearch, .flexibleSpace, .cdChatBar, .cdGear]
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [
+            .cdBack, .cdForward, .cdNewChat, .cdNewProject, .cdProjects,
+            .cdSidebar, .cdSearch, .cdAlwaysOnTop, .cdChatBar, .cdGear,
+            .space, .flexibleSpace
+        ]
+    }
+
+    func toolbar(
+        _ toolbar: NSToolbar,
+        itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+        willBeInsertedIntoToolbar flag: Bool
+    ) -> NSToolbarItem? {
+        switch itemIdentifier {
+        case .cdBack:
+            return makeItem(itemIdentifier, symbol: "chevron.left", label: "Back", action: #selector(backAction))
+        case .cdForward:
+            return makeItem(itemIdentifier, symbol: "chevron.right", label: "Forward", action: #selector(forwardAction))
+        case .cdNewChat:
+            return makeItem(itemIdentifier, symbol: "square.and.pencil", label: "New Chat", action: #selector(newChatAction))
+        case .cdNewProject:
+            return makeItem(itemIdentifier, symbol: "folder.badge.plus", label: "New Project", action: #selector(newProjectAction))
+        case .cdProjects:
+            return makeItem(itemIdentifier, symbol: "folder", label: "Projects", action: #selector(projectsAction))
+        case .cdSidebar:
+            return makeItem(itemIdentifier, symbol: "sidebar.left", label: "Sidebar", action: #selector(sidebarAction))
+        case .cdSearch:
+            return makeSearchItem(itemIdentifier)
+        case .cdAlwaysOnTop:
+            let pinned = coordinator?.alwaysOnTop ?? false
+            lastPinnedState = pinned
+            return makeItem(itemIdentifier, symbol: pinned ? "pin.fill" : "pin", label: "Always on Top", action: #selector(alwaysOnTopAction))
+        case .cdChatBar:
+            return makeItem(itemIdentifier, symbol: "bubble.left", label: "Chat Bar", action: #selector(chatBarAction))
+        case .cdGear:
+            return makeItem(itemIdentifier, symbol: "gear", label: "Claude Settings", action: #selector(gearAction))
+        default:
+            return nil // .space / .flexibleSpace are provided by the system
+        }
+    }
+
+    // MARK: - Validation (back/forward enabled state, alwaysOnTop pin icon)
+
+    func validateToolbarItem(_ item: NSToolbarItem) -> Bool {
+        switch item.itemIdentifier {
+        case .cdBack:
+            return coordinator?.canGoBack ?? false
+        case .cdForward:
+            return coordinator?.canGoForward ?? false
+        case .cdAlwaysOnTop:
+            let pinned = coordinator?.alwaysOnTop ?? false
+            if pinned != lastPinnedState {
+                lastPinnedState = pinned
+                item.image = NSImage(systemSymbolName: pinned ? "pin.fill" : "pin", accessibilityDescription: "Always on Top")
+            }
+            return true
+        default:
+            return true
+        }
+    }
+
+    // MARK: - Actions
+
+    @objc private func backAction() { coordinator?.goBack() }
+    @objc private func forwardAction() { coordinator?.goForward() }
+    @objc private func newChatAction() { coordinator?.openNewChat() }
+    @objc private func newProjectAction() { coordinator?.openNewProject() }
+    @objc private func projectsAction() { coordinator?.openProjects() }
+    @objc private func sidebarAction() { coordinator?.toggleSidebar() }
+    @objc private func searchFieldChanged(_ sender: NSSearchField) {
+        let query = sender.stringValue
+        guard !query.isEmpty else { return }
+        coordinator?.findInPage(query, forward: true) { _ in }
+    }
+    @objc private func alwaysOnTopAction() { coordinator?.toggleAlwaysOnTop() }
+    @objc private func gearAction() { coordinator?.openClaudeSettings() }
+    @objc private func chatBarAction() {
+        if let window = hostWindow, !(window is NSPanel) {
+            window.orderOut(nil)
+        }
+        coordinator?.showChatBar()
+    }
+
+    // MARK: - Item factory
+
+    private func makeItem(
+        _ identifier: NSToolbarItem.Identifier,
+        symbol: String,
+        label: String,
+        action: Selector
+    ) -> NSToolbarItem {
+        let item = NSToolbarItem(itemIdentifier: identifier)
+        item.label = label
+        item.paletteLabel = label
+        item.toolTip = label
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+        item.isBordered = true
+        item.target = self
+        item.action = action
+        return item
+    }
+
+    /// A Finder-style search field that collapses to the magnifier glyph and
+    /// expands inline when clicked or when adjacent space is available.
+    private func makeSearchItem(_ identifier: NSToolbarItem.Identifier) -> NSSearchToolbarItem {
+        let item = NSSearchToolbarItem(itemIdentifier: identifier)
+        item.label = "Find"
+        item.paletteLabel = "Find"
+        item.toolTip = "Find on Page"
+        item.searchField.placeholderString = "Find on page"
+        item.searchField.sendsSearchStringImmediately = false
+        item.searchField.sendsWholeSearchString = false
+        item.searchField.target = self
+        item.searchField.action = #selector(searchFieldChanged(_:))
+        return item
+    }
 }

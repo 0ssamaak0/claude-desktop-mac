@@ -26,7 +26,6 @@ struct ClaudeDesktopApp: App {
     var body: some Scene {
         Window(AppCoordinator.Constants.mainWindowTitle, id: Constants.mainWindowID) {
             MainWindowView(coordinator: coordinator)
-                .toolbarBackground(Color(nsColor: Constants.toolbarColor), for: .windowToolbar)
                 .frame(minWidth: Constants.mainWindowMinWidth, minHeight: Constants.mainWindowMinHeight)
         }
         .defaultSize(width: Constants.mainWindowDefaultWidth, height: Constants.mainWindowDefaultHeight)
@@ -46,6 +45,15 @@ struct ClaudeDesktopApp: App {
                     Label("New Project", systemImage: "folder.badge.plus")
                 }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
+            }
+
+            CommandGroup(after: .textEditing) {
+                Button {
+                    coordinator.focusToolbarSearch()
+                } label: {
+                    Label("Find on Page", systemImage: "magnifyingglass")
+                }
+                .keyboardShortcut("f", modifiers: .command)
             }
 
             CommandGroup(after: .toolbar) {
@@ -185,13 +193,6 @@ extension ClaudeDesktopApp {
         static let mainWindowID = "main"
 
         // Appearance
-        static let toolbarColor: NSColor = NSColor(name: nil) { appearance in
-            if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
-                return NSColor(red: 43.0/255.0, green: 43.0/255.0, blue: 43.0/255.0, alpha: 1.0)
-            } else {
-                return NSColor(red: 238.0/255.0, green: 241.0/255.0, blue: 247.0/255.0, alpha: 1.0)
-            }
-        }
         static let menuBarIcon = "bubble.left.and.bubble.right"
 
         // Timing
