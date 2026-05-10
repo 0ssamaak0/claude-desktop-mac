@@ -39,6 +39,7 @@ class WebViewModel {
 
     static let claudeHomeURL = URL(string: "https://claude.ai/new")!
     static let claudeProjectsURL = URL(string: "https://claude.ai/projects")!
+    static let claudeCodeURL = URL(string: "https://claude.ai/code")!
     static let defaultPageZoom: Double = 1.0
 
     private static let claudeHosts: Set<String> = ["claude.ai", "www.claude.ai"]
@@ -98,6 +99,20 @@ class WebViewModel {
         wkWebView.load(URLRequest(url: Self.claudeProjectsURL))
     }
 
+    func loadClaudeCode() {
+        isAtHome = false
+        wkWebView.load(URLRequest(url: Self.claudeCodeURL))
+    }
+
+    /// True when the current page is Claude Code (claude.ai/code or any subpath).
+    var isOnClaudeCode: Bool {
+        guard let url = wkWebView.url,
+              let host = url.host?.lowercased(),
+              Self.claudeHosts.contains(host) else { return false }
+        let path = url.path
+        return path == "/code" || path.hasPrefix("/code/")
+    }
+
     func goBack() {
         isAtHome = false
         wkWebView.goBack()
@@ -119,9 +134,56 @@ class WebViewModel {
         dispatchKeyboardShortcut(key: "i", code: "KeyI", keyCode: 73, shift: true, meta: true)
     }
 
-    /// Toggles Claude.ai's left sidebar by dispatching its in-page shortcut (Cmd+.).
+    /// Toggles the page's left sidebar. Classic Claude.ai listens for Cmd+. so
+    /// we synthesize that keystroke. Claude Code (claude.ai/code) wires its
+    /// Cmd+B shortcut in a way that does not pick up synthetic events, so we
+    /// click the sidebar trigger directly via the DOM with a synthetic-key
+    /// fallback for layout changes.
     func toggleSidebar() {
-        dispatchKeyboardShortcut(key: ".", code: "Period", keyCode: 190, shift: false, meta: true)
+        if isOnClaudeCode {
+            clickClaudeCodeSidebarToggle()
+        } else {
+            dispatchKeyboardShortcut(key: ".", code: "Period", keyCode: 190, shift: false, meta: true)
+        }
+    }
+
+    /// Finds and clicks Claude Code's sidebar toggle button. Tries a series of
+    /// selectors that cover Radix/shadcn-style sidebars and aria-label variants;
+    /// if none match, falls back to dispatching Cmd+B.
+    private func clickClaudeCodeSidebarToggle() {
+        let script = """
+        (function() {
+            const selectors = [
+                '[data-sidebar="trigger"]',
+                'button[data-sidebar="trigger"]',
+                'button[aria-label="Toggle Sidebar"]',
+                'button[aria-label="Toggle sidebar"]',
+                'button[aria-label*="toggle sidebar" i]',
+                'button[aria-label*="open sidebar" i]',
+                'button[aria-label*="close sidebar" i]',
+                'button[aria-label*="hide sidebar" i]',
+                'button[aria-label*="show sidebar" i]',
+                'button[aria-label*="sidebar" i]',
+                'button[aria-label*="navigation" i]',
+                'button[title*="sidebar" i]',
+                'button[data-testid*="sidebar" i]'
+            ];
+            for (const sel of selectors) {
+                const btn = document.querySelector(sel);
+                if (btn) {
+                    btn.click();
+                    return true;
+                }
+            }
+            return false;
+        })();
+        """
+        wkWebView.evaluateJavaScript(script) { [weak self] result, _ in
+            // If no matching button was found, fall back to dispatching Cmd+B.
+            if (result as? Bool) == false {
+                self?.dispatchKeyboardShortcut(key: "b", code: "KeyB", keyCode: 66, shift: false, meta: true)
+            }
+        }
     }
 
     /// Opens Claude.ai's website settings panel by dispatching its in-page shortcut (Shift+Cmd+,).
@@ -129,23 +191,34 @@ class WebViewModel {
         dispatchKeyboardShortcut(key: ",", code: "Comma", keyCode: 188, shift: true, meta: true)
     }
 
-    /// Dispatches a synthetic keydown event into the page so Claude.ai's own shortcut handlers fire.
+    /// Dispatches a synthetic keydown event into the page so the page's own
+    /// shortcut handlers fire. Some surfaces (e.g. Claude Code at claude.ai/code)
+    /// register on `window`; classic Claude listens on `document`. Fire on both
+    /// plus the active element so all listener strategies pick it up.
     private func dispatchKeyboardShortcut(key: String, code: String, keyCode: Int, shift: Bool, meta: Bool) {
         let script = """
         (function() {
-            const event = new KeyboardEvent('keydown', {
-                key: \(jsString(key)),
-                code: \(jsString(code)),
-                keyCode: \(keyCode),
-                which: \(keyCode),
-                shiftKey: \(shift ? "true" : "false"),
-                metaKey: \(meta ? "true" : "false"),
-                bubbles: true,
-                cancelable: true,
-                composed: true
-            });
-            document.activeElement.dispatchEvent(event);
-            document.dispatchEvent(event);
+            function makeEvent() {
+                return new KeyboardEvent('keydown', {
+                    key: \(jsString(key)),
+                    code: \(jsString(code)),
+                    keyCode: \(keyCode),
+                    which: \(keyCode),
+                    shiftKey: \(shift ? "true" : "false"),
+                    metaKey: \(meta ? "true" : "false"),
+                    ctrlKey: false,
+                    altKey: false,
+                    bubbles: true,
+                    cancelable: true,
+                    composed: true
+                });
+            }
+            const targets = [window, document, document.body, document.activeElement];
+            for (const t of targets) {
+                if (t && typeof t.dispatchEvent === 'function') {
+                    t.dispatchEvent(makeEvent());
+                }
+            }
         })();
         """
         wkWebView.evaluateJavaScript(script, completionHandler: nil)

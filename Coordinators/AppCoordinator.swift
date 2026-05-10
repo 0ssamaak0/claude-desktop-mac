@@ -41,6 +41,7 @@ class AppCoordinator {
     func openNewChat() { webViewModel.openNewChat() }
     func openNewProject() { webViewModel.openNewProject() }
     func openProjects() { webViewModel.loadProjects() }
+    func openClaudeCode() { webViewModel.loadClaudeCode() }
     func toggleSidebar() { webViewModel.toggleSidebar() }
     func openClaudeSettings() { webViewModel.openClaudeSettings() }
 
@@ -305,9 +306,11 @@ extension AppCoordinator {
 extension NSToolbarItem.Identifier {
     static let cdBack = NSToolbarItem.Identifier("cd.back")
     static let cdForward = NSToolbarItem.Identifier("cd.forward")
+    static let cdHome = NSToolbarItem.Identifier("cd.home")
     static let cdNewChat = NSToolbarItem.Identifier("cd.newChat")
     static let cdNewProject = NSToolbarItem.Identifier("cd.newProject")
     static let cdProjects = NSToolbarItem.Identifier("cd.projects")
+    static let cdClaudeCode = NSToolbarItem.Identifier("cd.claudeCode")
     static let cdSidebar = NSToolbarItem.Identifier("cd.sidebar")
     static let cdSearch = NSToolbarItem.Identifier("cd.search")
     static let cdAlwaysOnTop = NSToolbarItem.Identifier("cd.alwaysOnTop")
@@ -337,7 +340,7 @@ final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSToolbarItemValid
         [
             .cdBack,
             .space,
-            .cdNewChat, .cdProjects,
+            .cdHome, .cdNewChat, .cdProjects, .cdClaudeCode,
             .space,
             .cdSidebar, .cdSearch,
             .flexibleSpace,
@@ -349,7 +352,7 @@ final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSToolbarItemValid
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
         [
-            .cdBack, .cdForward, .cdNewChat, .cdNewProject, .cdProjects,
+            .cdBack, .cdForward, .cdHome, .cdNewChat, .cdNewProject, .cdProjects, .cdClaudeCode,
             .cdSidebar, .cdSearch, .cdAlwaysOnTop, .cdChatBar, .cdGear,
             .space, .flexibleSpace
         ]
@@ -365,12 +368,16 @@ final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSToolbarItemValid
             return makeItem(itemIdentifier, symbol: "chevron.left", label: "Back", action: #selector(backAction))
         case .cdForward:
             return makeItem(itemIdentifier, symbol: "chevron.right", label: "Forward", action: #selector(forwardAction))
+        case .cdHome:
+            return makeItem(itemIdentifier, symbol: "house", label: "Home", action: #selector(homeAction))
         case .cdNewChat:
             return makeItem(itemIdentifier, symbol: "square.and.pencil", label: "New Chat", action: #selector(newChatAction))
         case .cdNewProject:
             return makeItem(itemIdentifier, symbol: "folder.badge.plus", label: "New Project", action: #selector(newProjectAction))
         case .cdProjects:
             return makeItem(itemIdentifier, symbol: "folder", label: "Projects", action: #selector(projectsAction))
+        case .cdClaudeCode:
+            return makeItem(itemIdentifier, symbol: "chevron.left.forwardslash.chevron.right", label: "Claude Code", action: #selector(claudeCodeAction))
         case .cdSidebar:
             return makeItem(itemIdentifier, symbol: "sidebar.left", label: "Sidebar", action: #selector(sidebarAction))
         case .cdSearch:
@@ -412,9 +419,11 @@ final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSToolbarItemValid
 
     @objc private func backAction() { coordinator?.goBack() }
     @objc private func forwardAction() { coordinator?.goForward() }
+    @objc private func homeAction() { coordinator?.goHome() }
     @objc private func newChatAction() { coordinator?.openNewChat() }
     @objc private func newProjectAction() { coordinator?.openNewProject() }
     @objc private func projectsAction() { coordinator?.openProjects() }
+    @objc private func claudeCodeAction() { coordinator?.openClaudeCode() }
     @objc private func sidebarAction() { coordinator?.toggleSidebar() }
     @objc private func searchFieldChanged(_ sender: NSSearchField) {
         let query = sender.stringValue
