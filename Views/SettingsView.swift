@@ -1,17 +1,30 @@
+//
+//  SettingsView.swift
+//  AI Chat
+//
+
 import SwiftUI
 import KeyboardShortcuts
-import WebKit
 import ServiceManagement
+import AppKit
 
 struct SettingsView: View {
     let coordinator: AppCoordinator
-    @AppStorage(UserDefaultsKeys.pageZoom.rawValue) private var pageZoom: Double = Constants.defaultPageZoom
-    @AppStorage(UserDefaultsKeys.hideWindowAtLaunch.rawValue) private var hideWindowAtLaunch: Bool = false
-    @AppStorage(UserDefaultsKeys.hideDockIcon.rawValue) private var hideDockIcon: Bool = false
-    @AppStorage(UserDefaultsKeys.appTheme.rawValue) private var appTheme: String = AppTheme.system.rawValue
-    @AppStorage(UserDefaultsKeys.userAgentOption.rawValue) private var userAgentOption: String = UserAgentOption.safari.rawValue
-    @AppStorage(UserDefaultsKeys.customUserAgent.rawValue) private var customUserAgent: String = ""
-    @AppStorage(UserDefaultsKeys.panelPosition.rawValue) private var panelPosition: String = PanelPosition.bottomCenter.rawValue
+
+    @AppStorage(UserDefaultsKeys.pageZoom.rawValue)
+    private var pageZoom = Constants.defaultPageZoom
+    @AppStorage(UserDefaultsKeys.hideWindowAtLaunch.rawValue)
+    private var hideWindowAtLaunch = false
+    @AppStorage(UserDefaultsKeys.hideDockIcon.rawValue)
+    private var hideDockIcon = false
+    @AppStorage(UserDefaultsKeys.appTheme.rawValue)
+    private var appTheme = AppTheme.system.rawValue
+    @AppStorage(UserDefaultsKeys.userAgentOption.rawValue)
+    private var userAgentOption = UserAgentOption.safari.rawValue
+    @AppStorage(UserDefaultsKeys.customUserAgent.rawValue)
+    private var customUserAgent = ""
+    @AppStorage(UserDefaultsKeys.panelPosition.rawValue)
+    private var panelPosition = PanelPosition.bottomCenter.rawValue
 
     @State private var showingResetAlert = false
     @State private var isClearing = false
@@ -19,29 +32,68 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section("LLM Provider") {
+                HStack {
+                    Label("Active Provider", systemImage: "bubble.left.and.bubble.right")
+                    Spacer()
+                    Picker("Active Provider", selection: activeProviderBinding) {
+                        ForEach(LLMProvider.allCases) { provider in
+                            Text(provider.displayName).tag(provider)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 300)
+                }
+
+                Text("Switching opens the selected provider's home page. Each provider keeps its own sign-in.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("General") {
-                Toggle("Launch MenuBar at Login", isOn: $launchAtLogin)
+                Toggle("Launch AI Chat at Login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, newValue in
                         do {
-                            try newValue ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister()
-                        } catch { launchAtLogin = !newValue }
+                            if newValue {
+                                try SMAppService.mainApp.register()
+                            } else {
+                                try SMAppService.mainApp.unregister()
+                            }
+                        } catch {
+                            launchAtLogin = !newValue
+                        }
                     }
-                Toggle("Hide Desktop Window at Launch", isOn: $hideWindowAtLaunch)
+
+                Toggle("Hide Main Window at Launch", isOn: $hideWindowAtLaunch)
+
                 Toggle("Hide Dock Icon", isOn: $hideDockIcon)
                     .onChange(of: hideDockIcon) { _, newValue in
                         NSApp.setActivationPolicy(newValue ? .accessory : .regular)
                     }
             }
+
             Section("Chat Bar") {
                 HStack {
-                    Label("Position on Screen", systemImage: "rectangle.bottomthird.inset.filled")
+                    Label(
+                        "Position on Screen",
+                        systemImage: "rectangle.bottomthird.inset.filled"
+                    )
                     Spacer()
-                    Picker("", selection: $panelPosition) {
-                        ForEach([PanelPosition.bottomLeft, .bottomCenter, .bottomRight], id: \.rawValue) { pos in
-                            Text(pos.displayName).tag(pos.rawValue)
+                    Picker("Position on Screen", selection: $panelPosition) {
+                        ForEach(
+                            [
+                                PanelPosition.bottomLeft,
+                                .bottomCenter,
+                                .bottomRight
+                            ],
+                            id: \.rawValue
+                        ) { position in
+                            Text(position.displayName).tag(position.rawValue)
                         }
                         Divider()
-                        Text(PanelPosition.rememberLast.displayName).tag(PanelPosition.rememberLast.rawValue)
+                        Text(PanelPosition.rememberLast.displayName)
+                            .tag(PanelPosition.rememberLast.rawValue)
                     }
                     .labelsHidden()
                     .frame(width: 200)
@@ -49,26 +101,19 @@ struct SettingsView: View {
                         coordinator.resetChatBarPosition()
                     }
                 }
+
                 HStack {
                     Label("Keyboard Shortcut", systemImage: "command")
                     Spacer()
                     KeyboardShortcuts.Recorder(for: .bringToFront)
                 }
-                HStack {
-                    VStack(alignment: .leading) {
-                        Label("Quick Ask with Selection", systemImage: "text.cursor")
-                        Text("Opens the chat bar and pastes the selected text from the frontmost app. Requires Accessibility permission.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    KeyboardShortcuts.Recorder(for: .bringToFrontWithSelection)
-                }
             }
+
             Section("Appearance") {
                 HStack {
                     Text("Theme:")
                     Spacer()
-                    Picker("", selection: $appTheme) {
+                    Picker("Theme", selection: $appTheme) {
                         ForEach(AppTheme.allCases, id: \.rawValue) { theme in
                             Text(theme.displayName).tag(theme.rawValue)
                         }
@@ -80,22 +125,28 @@ struct SettingsView: View {
                         (AppTheme(rawValue: newValue) ?? .system).apply()
                     }
                 }
+
                 HStack {
                     Text("Text Size: \(Int((pageZoom * 100).rounded()))%")
                     Spacer()
-                    Stepper("",
-                            value: $pageZoom,
-                            in: Constants.minPageZoom...Constants.maxPageZoom,
-                            step: Constants.pageZoomStep)
-                        .onChange(of: pageZoom) { coordinator.webViewModel.wkWebView.pageZoom = $1 }
-                        .labelsHidden()
+                    Stepper(
+                        "Text Size",
+                        value: $pageZoom,
+                        in: Constants.minPageZoom...Constants.maxPageZoom,
+                        step: Constants.pageZoomStep
+                    )
+                    .labelsHidden()
+                    .onChange(of: pageZoom) { _, newValue in
+                        coordinator.webViewModel.wkWebView.pageZoom = newValue
+                    }
                 }
             }
+
             Section("User Agent") {
                 HStack {
                     Text("Browser Identity:")
                     Spacer()
-                    Picker("", selection: $userAgentOption) {
+                    Picker("Browser Identity", selection: $userAgentOption) {
                         ForEach(UserAgentOption.allCases, id: \.rawValue) { option in
                             Text(option.displayName).tag(option.rawValue)
                         }
@@ -107,38 +158,59 @@ struct SettingsView: View {
                         coordinator.webViewModel.applyUserAgent()
                     }
                 }
+
                 if userAgentOption == UserAgentOption.custom.rawValue {
-                    TextField("Custom User Agent", text: $customUserAgent, prompt: Text("Enter custom user agent string"))
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit {
-                            coordinator.webViewModel.applyUserAgent()
-                        }
+                    TextField(
+                        "Custom User Agent",
+                        text: $customUserAgent,
+                        prompt: Text("Enter custom user agent string")
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit {
+                        coordinator.webViewModel.applyUserAgent()
+                    }
                 }
+
                 Text(currentUserAgentDescription)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
             Section("Privacy") {
                 HStack {
                     VStack(alignment: .leading) {
                         Text("Reset Website Data")
-                        Text("Clears cookies, cache, and login sessions")
-                            .font(.caption).foregroundStyle(.secondary)
+                        Text("Clears cookies, cache, and login sessions for all providers")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("Reset", role: .destructive) { showingResetAlert = true }
-                        .disabled(isClearing)
-                        .overlay { if isClearing { ProgressView().scaleEffect(0.7) } }
+                    Button("Reset", role: .destructive) {
+                        showingResetAlert = true
+                    }
+                    .disabled(isClearing)
+                    .overlay {
+                        if isClearing {
+                            ProgressView().scaleEffect(0.7)
+                        }
+                    }
                 }
             }
         }
         .formStyle(.grouped)
         .alert("Reset Website Data?", isPresented: $showingResetAlert) {
-            Button("Cancel", role: .cancel) { }
-            Button("Reset", role: .destructive) { clearWebsiteData() }
+            Button("Cancel", role: .cancel) {}
+            Button("Reset", role: .destructive, action: clearWebsiteData)
         } message: {
-            Text("This will clear all cookies, cache, and login sessions. You will need to sign in to Claude again.")
+            Text("This clears website data for Claude, Gemini, and ChatGPT. You will need to sign in to each provider again.")
         }
+    }
+
+    private var activeProviderBinding: Binding<LLMProvider> {
+        Binding(
+            get: { coordinator.activeProvider },
+            set: { coordinator.switchProvider(to: $0) }
+        )
     }
 
     private var currentUserAgentDescription: String {
@@ -148,23 +220,19 @@ struct SettingsView: View {
 
     private func clearWebsiteData() {
         isClearing = true
-        let dataStore = WKWebsiteDataStore.default()
-        let types = WKWebsiteDataStore.allWebsiteDataTypes()
-        dataStore.fetchDataRecords(ofTypes: types) { records in
-            dataStore.removeData(ofTypes: types, for: records) {
-                DispatchQueue.main.async { isClearing = false }
+        coordinator.webViewModel.clearAllWebsiteData {
+            DispatchQueue.main.async {
+                isClearing = false
             }
         }
     }
 }
 
 extension SettingsView {
-
     struct Constants {
-        static let defaultPageZoom: Double = 1.0
-        static let minPageZoom: Double = 0.6
-        static let maxPageZoom: Double = 1.4
-        static let pageZoomStep: Double = 0.01
+        static let defaultPageZoom = 1.0
+        static let minPageZoom = 0.6
+        static let maxPageZoom = 1.4
+        static let pageZoomStep = 0.01
     }
-
 }

@@ -1,12 +1,11 @@
 //
-//  ChatBarContent.swift
-//  ClaudeDesktop
+//  ChatBarView.swift
+//  AI Chat
 //
 //  Created by alexcding on 2025-12-13.
 //
 
 import SwiftUI
-import WebKit
 
 /// An invisible drag region that initiates window dragging on mouseDown
 struct WindowDragView: NSViewRepresentable {
@@ -61,7 +60,7 @@ struct ChatBarView: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            ClaudeWebView(webView: webViewModel.wkWebView)
+            BrowserWebView(webViewModel: webViewModel)
 
             // Expand button
             Button(action: onExpandToMain) {
@@ -75,7 +74,7 @@ struct ChatBarView: View {
             .buttonStyle(.plain)
             .padding(16)
 
-            // Invisible drag region in the top bar (between title and sidebar)
+            // Leave provider-owned controls at either side interactive.
             VStack {
                 HStack {
                     Spacer()
@@ -92,8 +91,8 @@ struct ChatBarView: View {
     }
 
     private enum Constants {
-        static let dragRegionLeading: CGFloat = 80   // skip past header chrome
-        static let dragRegionTrailing: CGFloat = 160 // skip past expand button + account / actions
+        static let dragRegionLeading: CGFloat = 80
+        static let dragRegionTrailing: CGFloat = 160
         static let dragRegionHeight: CGFloat = 38
         static let dragRegionTopPadding: CGFloat = 16
     }

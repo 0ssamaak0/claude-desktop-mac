@@ -6,8 +6,8 @@
     {
       "layers" : [
         {
-          "image-name" : "Claude_AI_symbol.svg",
-          "name" : "Claude_AI_symbol",
+          "image-name" : "AIChatBubble.png",
+          "name" : "AIChatBubble",
           "position" : {
             "scale" : 0.7,
             "translation-in-points" : [

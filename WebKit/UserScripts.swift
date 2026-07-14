@@ -1,93 +1,70 @@
 //
 //  UserScripts.swift
-//  ClaudeDesktop
-//
-//  Created by alexcding on 2025-12-15.
+//  AI Chat
 //
 
 import WebKit
 
-/// Collection of user scripts injected into WKWebView
+/// Composes scripts shared by every provider with the active provider's
+/// conversation detector. Configurations are rebuilt when providers switch.
 enum UserScripts {
-
-    /// Message handler name for console log bridging
     static let consoleLogHandler = "consoleLog"
-
-    /// Message handler name for conversation state push updates
     static let conversationStateHandler = "conversationState"
 
-    /// Creates all user scripts to be injected into the WebView
-    static func createAllScripts() -> [WKUserScript] {
-        var scripts: [WKUserScript] = [
-            createIMEFixScript(),
-            createConversationObserverScript()
+    static func createAllScripts(for adapter: any ProviderAdapter) -> [WKUserScript] {
+        var scripts = [
+            WKUserScript(
+                source: imeFixSource,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            ),
+            WKUserScript(
+                source: conversationObserverSource(
+                    providerSource: adapter.conversationObserverSource
+                ),
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            )
         ]
 
         #if DEBUG
-        scripts.insert(createConsoleLogBridgeScript(), at: 0)
+        scripts.insert(
+            WKUserScript(
+                source: consoleLogBridgeSource,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: false
+            ),
+            at: 0
+        )
         #endif
 
         return scripts
     }
 
-    /// Creates a script that bridges console.log to native Swift
-    private static func createConsoleLogBridgeScript() -> WKUserScript {
-        WKUserScript(
-            source: consoleLogBridgeSource,
-            injectionTime: .atDocumentStart,
-            forMainFrameOnly: false
-        )
-    }
-
-    /// Creates the IME fix script that resolves the double-enter issue
-    /// when using input method editors (e.g., Chinese, Japanese, Korean input)
-    private static func createIMEFixScript() -> WKUserScript {
-        WKUserScript(
-            source: imeFixSource,
-            injectionTime: .atDocumentEnd,
-            forMainFrameOnly: true
-        )
-    }
-
-    /// Creates a MutationObserver-based script that pushes conversation
-    /// state changes to native code (replaces a 1Hz JS poll).
-    private static func createConversationObserverScript() -> WKUserScript {
-        WKUserScript(
-            source: conversationObserverSource,
-            injectionTime: .atDocumentStart,
-            forMainFrameOnly: true
-        )
-    }
-
-    // MARK: - Script Sources
-
-    /// JavaScript to bridge console.log to native Swift via WKScriptMessageHandler
     private static let consoleLogBridgeSource = """
     (function() {
-        const originalLog = console.log;
+        if (window.__aiChatConsoleBridgeInstalled) return;
+        window.__aiChatConsoleBridgeInstalled = true;
+        const originalLog = console.log.bind(console);
         console.log = function(...args) {
-            originalLog.apply(console, args);
+            originalLog(...args);
             try {
-                const message = args.map(arg => {
-                    if (typeof arg === 'object') {
-                        return JSON.stringify(arg, null, 2);
-                    }
+                const message = args.map(function(arg) {
+                    if (typeof arg === 'object') return JSON.stringify(arg);
                     return String(arg);
                 }).join(' ');
                 window.webkit.messageHandlers.\(consoleLogHandler).postMessage(message);
-            } catch (e) {}
+            } catch (_) {}
         };
     })();
     """
 
-    /// JavaScript to fix IME Enter issue in the web composer
-    /// When using IME (e.g., Chinese/Japanese input), pressing Enter to confirm
-    /// the IME composition should NOT send the message. This script intercepts
-    /// Enter keydown events during and immediately after IME composition,
-    /// preventing them from reaching the page send handler.
+    /// Prevents the Enter used to commit an IME composition from also sending.
     private static let imeFixSource = """
     (function() {
         'use strict';
+        if (window.__aiChatIMEFixInstalled) return;
+        window.__aiChatIMEFixInstalled = true;
 
         let imeActive = false;
         let imeEverUsed = false;
@@ -95,95 +72,102 @@ enum UserScripts {
         const BUFFER_TIME = 300;
 
         function isInIMEWindow() {
-            return imeActive || (Date.now() - compositionEndTime < BUFFER_TIME);
+            return imeActive || Date.now() - compositionEndTime < BUFFER_TIME;
         }
 
         document.addEventListener('compositionstart', function() {
             imeActive = true;
             imeEverUsed = true;
         }, true);
-
         document.addEventListener('compositionend', function() {
             imeActive = false;
             compositionEndTime = Date.now();
         }, true);
-
-        document.addEventListener('keydown', function(e) {
-            if (!imeEverUsed) return;
-            if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.altKey) return;
-
-            if (isInIMEWindow() || e.isComposing || e.keyCode === 229) {
-                e.stopImmediatePropagation();
-                e.preventDefault();
+        document.addEventListener('keydown', function(event) {
+            if (!imeEverUsed || event.key !== 'Enter' || event.shiftKey ||
+                event.ctrlKey || event.altKey) return;
+            if (isInIMEWindow() || event.isComposing || event.keyCode === 229) {
+                event.stopImmediatePropagation();
+                event.preventDefault();
             }
         }, true);
-
-        document.addEventListener('beforeinput', function(e) {
+        document.addEventListener('beforeinput', function(event) {
             if (!imeEverUsed) return;
-            if (e.inputType !== 'insertParagraph' && e.inputType !== 'insertLineBreak') return;
-
+            if (event.inputType !== 'insertParagraph' &&
+                event.inputType !== 'insertLineBreak') return;
             if (isInIMEWindow()) {
-                e.stopImmediatePropagation();
-                e.preventDefault();
+                event.stopImmediatePropagation();
+                event.preventDefault();
             }
         }, true);
     })();
     """
 
-    /// Pushes conversation state to native via MutationObserver instead of polling.
-    /// Posts `{ inConversation: Bool }` only when state transitions.
-    private static let conversationObserverSource = """
-    (function() {
-        'use strict';
-        let lastState = null;
-        let scheduled = false;
+    private static func conversationObserverSource(providerSource: String) -> String {
+        """
+        (function() {
+            'use strict';
+            if (window.__aiChatConversationObserverInstalled) return;
+            window.__aiChatConversationObserverInstalled = true;
 
-        function isInConv() {
-            if (document.querySelector('[data-testid="conversation-turn"]')) return true;
-            if (document.querySelector('[data-is-streaming="true"]')) return true;
-            const main = document.querySelector('main');
-            if (!main) return false;
-            const articles = main.querySelectorAll('article, [data-turn], [class*="Message"]');
-            if (articles.length >= 2) return true;
-            const rows = main.querySelectorAll('[class*="message"], [class*="MessageRow"]');
-            return rows.length >= 2;
-        }
+            \(providerSource)
 
-        function publish() {
-            const state = isInConv();
-            if (state === lastState) return;
-            lastState = state;
-            try {
-                window.webkit.messageHandlers.\(conversationStateHandler).postMessage({ inConversation: state });
-            } catch (e) {}
-        }
+            let lastState = null;
+            let scheduled = false;
 
-        function schedule() {
-            if (scheduled) return;
-            scheduled = true;
-            setTimeout(function() { scheduled = false; publish(); }, 100);
-        }
+            function publish() {
+                const state = !!isInProviderConversation();
+                if (state === lastState) return;
+                lastState = state;
+                try {
+                    window.webkit.messageHandlers.\(conversationStateHandler).postMessage({
+                        inConversation: state
+                    });
+                } catch (_) {}
+            }
 
-        const observer = new MutationObserver(schedule);
+            function schedule() {
+                if (scheduled) return;
+                scheduled = true;
+                setTimeout(function() {
+                    scheduled = false;
+                    publish();
+                }, 100);
+            }
 
-        function start() {
-            if (!document.body) return;
-            observer.observe(document.body, { childList: true, subtree: true });
-            publish();
-        }
+            function start() {
+                if (!document.body) {
+                    setTimeout(start, 25);
+                    return;
+                }
+                new MutationObserver(schedule).observe(document.body, {
+                    childList: true,
+                    subtree: true,
+                    attributes: true,
+                    attributeFilter: ['data-is-streaming']
+                });
+                publish();
+            }
 
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', start, { once: true });
-        } else {
-            start();
-        }
-
-        // SPA navigations don't reload the page; re-check on history changes.
-        const origPush = history.pushState;
-        const origReplace = history.replaceState;
-        history.pushState = function() { origPush.apply(this, arguments); schedule(); };
-        history.replaceState = function() { origReplace.apply(this, arguments); schedule(); };
-        window.addEventListener('popstate', schedule);
-    })();
-    """
+            const originalPushState = history.pushState;
+            const originalReplaceState = history.replaceState;
+            history.pushState = function() {
+                const result = originalPushState.apply(this, arguments);
+                schedule();
+                return result;
+            };
+            history.replaceState = function() {
+                const result = originalReplaceState.apply(this, arguments);
+                schedule();
+                return result;
+            };
+            window.addEventListener('popstate', schedule);
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', start, { once: true });
+            } else {
+                start();
+            }
+        })();
+        """
+    }
 }

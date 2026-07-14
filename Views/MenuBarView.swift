@@ -1,6 +1,6 @@
 //
-//  MenuBarContentView.swift
-//  ClaudeDesktop
+//  MenuBarView.swift
+//  AI Chat
 //
 //  Created by alexcding on 2025-12-13.
 //
@@ -17,7 +17,7 @@ struct MenuBarView: View {
             Button {
                 coordinator.openMainWindow()
             } label: {
-                Label("Open Claude Desktop", systemImage: "macwindow")
+                Label("Open AI Chat", systemImage: "macwindow")
             }
 
             Button {
@@ -38,7 +38,7 @@ struct MenuBarView: View {
             Button {
                 NSApp.terminate(nil)
             } label: {
-                Label("Quit", systemImage: "power")
+                Label("Quit AI Chat", systemImage: "power")
             }
             .keyboardShortcut("q", modifiers: .command)
         }

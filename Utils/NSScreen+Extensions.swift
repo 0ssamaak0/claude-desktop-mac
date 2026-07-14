@@ -1,6 +1,6 @@
 //
 //  NSScreen+Extensions.swift
-//  ClaudeDesktop
+//  AI Chat
 //
 //  Created by alexcding on 2025-12-23.
 //

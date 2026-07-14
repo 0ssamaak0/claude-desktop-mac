@@ -16,9 +16,23 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "74CBD8A92EED8FCB00F226E3"
-               BuildableName = "Claude Desktop.app"
-               BlueprintName = "ClaudeDesktop"
-               ReferencedContainer = "container:ClaudeDesktop.xcodeproj">
+               BuildableName = "AI Chat.app"
+               BlueprintName = "AIChat"
+               ReferencedContainer = "container:AIChat.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A1C4B0072F21000100A1C4B0"
+               BuildableName = "AIChatTests.xctest"
+               BlueprintName = "AIChatTests"
+               ReferencedContainer = "container:AIChat.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -27,8 +41,20 @@
       buildConfiguration = "Debug"
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
-      shouldUseLaunchSchemeArgsEnv = "YES"
-      shouldAutocreateTestPlan = "YES">
+      shouldUseLaunchSchemeArgsEnv = "YES">
+      <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A1C4B0072F21000100A1C4B0"
+               BuildableName = "AIChatTests.xctest"
+               BlueprintName = "AIChatTests"
+               ReferencedContainer = "container:AIChat.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+      </Testables>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"
@@ -45,9 +71,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "74CBD8A92EED8FCB00F226E3"
-            BuildableName = "Claude Desktop.app"
-            BlueprintName = "ClaudeDesktop"
-            ReferencedContainer = "container:ClaudeDesktop.xcodeproj">
+            BuildableName = "AI Chat.app"
+            BlueprintName = "AIChat"
+            ReferencedContainer = "container:AIChat.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
       <EnvironmentVariables>
@@ -69,9 +95,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "74CBD8A92EED8FCB00F226E3"
-            BuildableName = "Claude Desktop.app"
-            BlueprintName = "ClaudeDesktop"
-            ReferencedContainer = "container:ClaudeDesktop.xcodeproj">
+            BuildableName = "AI Chat.app"
+            BlueprintName = "AIChat"
+            ReferencedContainer = "container:AIChat.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

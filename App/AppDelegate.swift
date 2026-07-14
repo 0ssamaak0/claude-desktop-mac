@@ -1,14 +1,14 @@
 //
 //  AppDelegate.swift
-//  ClaudeDesktop
+//  AI Chat
 //
 
 import AppKit
     
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        // Always open main window when dock icon is clicked
-        // This handles the case where only the chat bar panel is visible
+        // Open the shared main window when the Dock icon is clicked, including
+        // when the Chat Bar is the only visible app window.
         NotificationCenter.default.post(name: .openMainWindow, object: nil)
         return true
     }

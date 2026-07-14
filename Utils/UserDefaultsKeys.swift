@@ -1,6 +1,6 @@
 //
 //  UserDefaultsKeys.swift
-//  ClaudeDesktop
+//  AI Chat
 //
 //  Created by alexcding on 2025-12-13.
 //
@@ -9,6 +9,7 @@ import Foundation
 import AppKit
 
 enum UserDefaultsKeys: String {
+    case activeProvider = "activeLLMProvider"
     case panelWidth
     case panelHeight
     case pageZoom

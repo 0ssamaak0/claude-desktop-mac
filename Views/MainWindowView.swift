@@ -1,6 +1,6 @@
 //
-//  MainWindowContent.swift
-//  ClaudeDesktop
+//  MainWindowView.swift
+//  AI Chat
 //
 //  Created by alexcding on 2025-12-13.
 //
@@ -14,7 +14,7 @@ struct MainWindowView: View {
 
     var body: some View {
         ZStack {
-            ClaudeWebView(webView: coordinator.webViewModel.wkWebView)
+            BrowserWebView(webViewModel: coordinator.webViewModel)
 
             if coordinator.webViewModel.isLoading {
                 ProgressView()
@@ -23,15 +23,15 @@ struct MainWindowView: View {
                     .background(.background)
             }
         }
-            .ignoresSafeArea()
-            .background(WindowAccessor { window in
-                coordinator.attachMainToolbar(to: window)
-            })
-            .onAppear {
-                coordinator.openWindowAction = { id in
-                    openWindow(id: id)
-                }
+        .ignoresSafeArea()
+        .background(WindowAccessor { window in
+            coordinator.attachMainToolbar(to: window)
+        })
+        .onAppear {
+            coordinator.openWindowAction = { id in
+                openWindow(id: id)
             }
+        }
     }
 }
 

@@ -1,35 +1,54 @@
 //
 //  AppCoordinator.swift
-//  ClaudeDesktop
+//  AI Chat
 //
 //  Created by alexcding on 2025-12-13.
 //
 
 import SwiftUI
 import AppKit
-import WebKit
 
 extension Notification.Name {
     static let openMainWindow = Notification.Name("openMainWindow")
 }
 
+@MainActor
 @Observable
-class AppCoordinator {
+final class AppCoordinator {
     private var chatBar: ChatBarPanel?
     private var mainToolbarDelegate: MainToolbarDelegate?
-    var webViewModel = WebViewModel()
 
+    let webViewModel = WebViewModel()
     var openWindowAction: ((String) -> Void)?
-    var alwaysOnTop: Bool = UserDefaults.standard.bool(forKey: UserDefaultsKeys.alwaysOnTop.rawValue)
+    var alwaysOnTop = UserDefaults.standard.bool(
+        forKey: UserDefaultsKeys.alwaysOnTop.rawValue
+    )
 
+    var activeProvider: LLMProvider { webViewModel.provider }
+    var capabilities: ProviderCapabilities { webViewModel.capabilities }
     var canGoBack: Bool { webViewModel.canGoBack }
     var canGoForward: Bool { webViewModel.canGoForward }
 
     init() {
-        // Observe notifications for window opening
-        NotificationCenter.default.addObserver(forName: .openMainWindow, object: nil, queue: .main) { [weak self] _ in
-            self?.openMainWindow()
+        NotificationCenter.default.addObserver(
+            forName: .openMainWindow,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.openMainWindow()
+            }
         }
+    }
+
+    // MARK: - Provider
+
+    func switchProvider(to provider: LLMProvider) {
+        guard provider != activeProvider else { return }
+
+        webViewModel.switchProvider(to: provider)
+        rebuildMainToolbar()
+        chatBar?.providerDidSwitch()
     }
 
     // MARK: - Navigation
@@ -39,23 +58,29 @@ class AppCoordinator {
     func goHome() { webViewModel.loadHome() }
     func reload() { webViewModel.reload() }
     func openNewChat() { webViewModel.openNewChat() }
+    func openPrivateChat() { webViewModel.openPrivateChat() }
     func openNewProject() { webViewModel.openNewProject() }
     func openProjects() { webViewModel.loadProjects() }
     func openClaudeCode() { webViewModel.loadClaudeCode() }
     func toggleSidebar() { webViewModel.toggleSidebar() }
-    func openClaudeSettings() { webViewModel.openClaudeSettings() }
+    func openProviderSettings() { webViewModel.openProviderSettings() }
 
-    // MARK: - Find in page
+    // MARK: - Find in Page
 
-    func findInPage(_ query: String, forward: Bool, completion: @escaping (Bool) -> Void) {
+    func findInPage(
+        _ query: String,
+        forward: Bool,
+        completion: @escaping (Bool) -> Void
+    ) {
         webViewModel.findInPage(query, forward: forward, completion: completion)
     }
 
-    /// Focuses the search field embedded in the toolbar (if the user kept it
-    /// visible) and expands it. Driven by the Cmd+F menu command.
+    /// Focuses the search field embedded in the toolbar, when present.
     func focusToolbarSearch() {
         guard let toolbar = findMainWindow()?.toolbar,
-              let searchItem = toolbar.items.first(where: { $0.itemIdentifier == .cdSearch }) as? NSSearchToolbarItem else {
+              let searchItem = toolbar.items.first(where: {
+                  $0.itemIdentifier == .aiSearch
+              }) as? NSSearchToolbarItem else {
             return
         }
         searchItem.beginSearchInteraction()
@@ -63,15 +88,21 @@ class AppCoordinator {
 
     // MARK: - Toolbar
 
-    /// Attaches a custom NSToolbar with full customization support (real
-    /// Space / Flexible Space items, autosaved layout) to the given window.
-    /// Idempotent.
+    /// Attaches the capability-driven toolbar for the active provider. Each
+    /// provider gets its own autosaved customization layout.
     func attachMainToolbar(to window: NSWindow) {
-        if window.toolbar?.identifier == MainToolbarDelegate.toolbarIdentifier {
-            return
-        }
-        let delegate = MainToolbarDelegate(coordinator: self, window: window)
-        let toolbar = NSToolbar(identifier: MainToolbarDelegate.toolbarIdentifier)
+        let expectedIdentifier = MainToolbarDelegate.toolbarIdentifier(
+            for: activeProvider
+        )
+        guard window.toolbar?.identifier != expectedIdentifier else { return }
+
+        let delegate = MainToolbarDelegate(
+            coordinator: self,
+            window: window,
+            provider: activeProvider,
+            capabilities: capabilities
+        )
+        let toolbar = NSToolbar(identifier: expectedIdentifier)
         toolbar.delegate = delegate
         toolbar.displayMode = .iconOnly
         toolbar.allowsUserCustomization = true
@@ -79,13 +110,18 @@ class AppCoordinator {
         window.toolbar = toolbar
         window.toolbarStyle = .unified
 
-        // Float the toolbar pills over the WebView (Tahoe Liquid Glass).
+        // Float the toolbar pills over the web content.
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.titlebarSeparatorStyle = .none
         window.styleMask.insert(.fullSizeContentView)
 
         mainToolbarDelegate = delegate
+    }
+
+    private func rebuildMainToolbar() {
+        guard let window = findMainWindow() else { return }
+        attachMainToolbar(to: window)
     }
 
     // MARK: - Zoom
@@ -98,39 +134,31 @@ class AppCoordinator {
 
     func toggleAlwaysOnTop() {
         alwaysOnTop.toggle()
-        UserDefaults.standard.set(alwaysOnTop, forKey: UserDefaultsKeys.alwaysOnTop.rawValue)
+        UserDefaults.standard.set(
+            alwaysOnTop,
+            forKey: UserDefaultsKeys.alwaysOnTop.rawValue
+        )
         applyAlwaysOnTop()
     }
 
     func applyAlwaysOnTop() {
-        let level: NSWindow.Level = alwaysOnTop ? .floating : .normal
-
-        // Apply to main window
-        if let mainWindow = findMainWindow() {
-            mainWindow.level = level
-        }
-
-        // Chat bar panel is always floating by design
+        findMainWindow()?.level = alwaysOnTop ? .floating : .normal
+        // The Chat Bar is always floating by design.
     }
 
     // MARK: - Chat Bar
 
     func showChatBar() {
-        // Resume WebView if suspended by inactivity (starts loading before window appears)
         webViewModel.resumeIfSuspended()
-
-        // Hide main window when showing chat bar
         closeMainWindow()
 
         let position = PanelPosition.current
-
         if let bar = chatBar {
-            // Reposition unless "Remember last position" is selected
             if position != .rememberLast {
                 positionChatBar(bar, position: position)
             }
             bar.makeKeyAndOrderFront(nil)
-            bar.checkAndAdjustSize()
+            bar.prepareForPresentation()
             return
         }
 
@@ -141,26 +169,34 @@ class AppCoordinator {
             }
         )
         let hostingView = NSHostingView(rootView: contentView)
-        let bar = ChatBarPanel(contentView: hostingView, webViewModel: webViewModel)
+        let bar = ChatBarPanel(
+            contentView: hostingView,
+            webViewModel: webViewModel
+        )
 
-        // Position based on setting
         positionChatBar(bar, position: position)
-
-        bar.makeKeyAndOrderFront(nil)
         chatBar = bar
+        bar.makeKeyAndOrderFront(nil)
+        bar.prepareForPresentation()
     }
 
-    /// Positions the chat bar based on the given position setting
     private func positionChatBar(_ bar: ChatBarPanel, position: PanelPosition) {
-        guard let screen = NSScreen.screenAtMouseLocation() ?? NSScreen.main else { return }
+        guard let screen = NSScreen.screenAtMouseLocation() ?? NSScreen.main else {
+            return
+        }
 
         if position == .rememberLast {
             let defaults = UserDefaults.standard
             if defaults.object(forKey: UserDefaultsKeys.panelX.rawValue) != nil,
                defaults.object(forKey: UserDefaultsKeys.panelY.rawValue) != nil {
-                let saved = NSPoint(x: defaults.double(forKey: UserDefaultsKeys.panelX.rawValue),
-                                    y: defaults.double(forKey: UserDefaultsKeys.panelY.rawValue))
-                let center = NSPoint(x: saved.x + bar.frame.width / 2, y: saved.y + bar.frame.height / 2)
+                let saved = NSPoint(
+                    x: defaults.double(forKey: UserDefaultsKeys.panelX.rawValue),
+                    y: defaults.double(forKey: UserDefaultsKeys.panelY.rawValue)
+                )
+                let center = NSPoint(
+                    x: saved.x + bar.frame.width / 2,
+                    y: saved.y + bar.frame.height / 2
+                )
                 if NSScreen.screenStrictly(containing: center) != nil {
                     bar.setFrameOrigin(saved)
                     return
@@ -168,14 +204,17 @@ class AppCoordinator {
             }
         }
 
-        let origin = screen.point(for: bar.frame.size, position: position, dockOffset: Constants.dockOffset)
+        let origin = screen.point(
+            for: bar.frame.size,
+            position: position,
+            dockOffset: Constants.dockOffset
+        )
         bar.setFrameOrigin(origin)
     }
 
-    /// Repositions the chat bar to its configured position
     func resetChatBarPosition() {
-        guard let bar = chatBar else { return }
-        positionChatBar(bar, position: PanelPosition.current)
+        guard let chatBar else { return }
+        positionChatBar(chatBar, position: PanelPosition.current)
     }
 
     func hideChatBar() {
@@ -183,38 +222,18 @@ class AppCoordinator {
     }
 
     func closeMainWindow() {
-        // Find and hide the main window
-        for window in NSApp.windows {
-            if window.identifier?.rawValue == Constants.mainWindowIdentifier || window.title == Constants.mainWindowTitle {
-                if !(window is NSPanel) {
-                    window.orderOut(nil)
-                }
-            }
-        }
+        findMainWindow()?.orderOut(nil)
     }
 
     func toggleChatBar() {
-        if let bar = chatBar, bar.isVisible {
+        if let chatBar, chatBar.isVisible {
             hideChatBar()
         } else {
             showChatBar()
         }
     }
 
-    /// Captures selected text from the frontmost app, then shows the chat bar
-    /// with that text inserted into the composer.
-    func showChatBarWithSelection() {
-        SelectionCapture.captureSelectedText { [weak self] selection in
-            guard let self = self else { return }
-            self.showChatBar()
-            if let text = selection, !text.isEmpty {
-                self.webViewModel.insertTextIntoComposer(text)
-            }
-        }
-    }
-
     func expandToMainWindow() {
-        // Capture the screen where the chat bar is located before hiding it
         let targetScreen = chatBar.flatMap { bar -> NSScreen? in
             let center = NSPoint(x: bar.frame.midX, y: bar.frame.midY)
             return NSScreen.screen(containing: center)
@@ -225,32 +244,25 @@ class AppCoordinator {
     }
 
     func openMainWindow(on targetScreen: NSScreen? = nil) {
-        // Resume WebView if suspended by inactivity (starts loading before window appears)
         webViewModel.resumeIfSuspended()
-
-        // Hide chat bar first - WebView can only be in one view hierarchy
         hideChatBar()
 
-        let hideDockIcon = UserDefaults.standard.bool(forKey: UserDefaultsKeys.hideDockIcon.rawValue)
+        let hideDockIcon = UserDefaults.standard.bool(
+            forKey: UserDefaultsKeys.hideDockIcon.rawValue
+        )
         if !hideDockIcon {
             NSApp.setActivationPolicy(.regular)
         }
 
-        // Find existing main window (may be hidden/suppressed)
-        let mainWindow = findMainWindow()
-
-        if let window = mainWindow {
-            // Window exists - show it (works for suppressed windows too)
-            if let screen = targetScreen {
-                centerWindow(window, on: screen)
+        if let window = findMainWindow() {
+            if let targetScreen {
+                centerWindow(window, on: targetScreen)
             }
             window.makeKeyAndOrderFront(nil)
-        } else if let openWindowAction = openWindowAction {
-            // Window doesn't exist yet - use SwiftUI openWindow to create it
-            openWindowAction("main")
-            // Position newly created window with retry mechanism
-            if let screen = targetScreen {
-                centerNewlyCreatedWindow(on: screen)
+        } else if let openWindowAction {
+            openWindowAction(Constants.mainWindowIdentifier)
+            if let targetScreen {
+                centerNewlyCreatedWindow(on: targetScreen)
             }
         }
 
@@ -258,104 +270,155 @@ class AppCoordinator {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    /// Finds the main window by identifier or title
     private func findMainWindow() -> NSWindow? {
         NSApp.windows.first {
-            $0.identifier?.rawValue == Constants.mainWindowIdentifier || $0.title == Constants.mainWindowTitle
+            ($0.identifier?.rawValue == Constants.mainWindowIdentifier ||
+             $0.title == Constants.mainWindowTitle) && !($0 is NSPanel)
         }
     }
 
-    /// Centers a window on the specified screen
     private func centerWindow(_ window: NSWindow, on screen: NSScreen) {
-        let origin = screen.centerPoint(for: window.frame.size)
-        window.setFrameOrigin(origin)
+        window.setFrameOrigin(screen.centerPoint(for: window.frame.size))
     }
 
-    /// Centers a newly created window on the target screen with retry mechanism
     private func centerNewlyCreatedWindow(on screen: NSScreen, attempt: Int = 1) {
-        let maxAttempts = 5
-        let retryDelay = 0.05 // 50ms between attempts
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + retryDelay) { [weak self] in
-            guard let self = self else { return }
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Constants.windowCreationRetryDelay
+        ) { [weak self] in
+            guard let self else { return }
 
             if let window = self.findMainWindow() {
                 self.centerWindow(window, on: screen)
                 self.applyAlwaysOnTop()
-            } else if attempt < maxAttempts {
-                // Window not found yet, retry
+            } else if attempt < Constants.windowCreationMaxAttempts {
                 self.centerNewlyCreatedWindow(on: screen, attempt: attempt + 1)
             }
         }
     }
 }
 
-
 extension AppCoordinator {
-
     struct Constants {
         static let dockOffset: CGFloat = 50
         static let mainWindowIdentifier = "main"
-        static let mainWindowTitle = "Claude Desktop"
+        static let mainWindowTitle = "AI Chat"
+        static let windowCreationRetryDelay: TimeInterval = 0.05
+        static let windowCreationMaxAttempts = 5
     }
-
 }
 
-// MARK: - NSToolbar identifiers
+// MARK: - NSToolbar Identifiers
 
 extension NSToolbarItem.Identifier {
-    static let cdBack = NSToolbarItem.Identifier("cd.back")
-    static let cdForward = NSToolbarItem.Identifier("cd.forward")
-    static let cdHome = NSToolbarItem.Identifier("cd.home")
-    static let cdNewChat = NSToolbarItem.Identifier("cd.newChat")
-    static let cdNewProject = NSToolbarItem.Identifier("cd.newProject")
-    static let cdProjects = NSToolbarItem.Identifier("cd.projects")
-    static let cdClaudeCode = NSToolbarItem.Identifier("cd.claudeCode")
-    static let cdSidebar = NSToolbarItem.Identifier("cd.sidebar")
-    static let cdSearch = NSToolbarItem.Identifier("cd.search")
-    static let cdAlwaysOnTop = NSToolbarItem.Identifier("cd.alwaysOnTop")
-    static let cdChatBar = NSToolbarItem.Identifier("cd.chatBar")
-    static let cdGear = NSToolbarItem.Identifier("cd.gear")
+    static let aiBack = NSToolbarItem.Identifier("aichat.back")
+    static let aiForward = NSToolbarItem.Identifier("aichat.forward")
+    static let aiHome = NSToolbarItem.Identifier("aichat.home")
+    static let aiNewChat = NSToolbarItem.Identifier("aichat.newChat")
+    static let aiPrivateChat = NSToolbarItem.Identifier("aichat.privateChat")
+    static let aiNewProject = NSToolbarItem.Identifier("aichat.newProject")
+    static let aiProjects = NSToolbarItem.Identifier("aichat.projects")
+    static let aiClaudeCode = NSToolbarItem.Identifier("aichat.claudeCode")
+    static let aiSidebar = NSToolbarItem.Identifier("aichat.sidebar")
+    static let aiSearch = NSToolbarItem.Identifier("aichat.search")
+    static let aiAlwaysOnTop = NSToolbarItem.Identifier("aichat.alwaysOnTop")
+    static let aiChatBar = NSToolbarItem.Identifier("aichat.chatBar")
+    static let aiProviderSettings = NSToolbarItem.Identifier("aichat.providerSettings")
 }
 
-/// NSToolbarDelegate for the main window. Hosts a full set of customizable
-/// items plus the standard `.space` and `.flexibleSpace` so users can drop
-/// gaps anywhere in the toolbar and rearrange icons freely.
+/// Capability-driven toolbar for the active provider. A new instance is
+/// created when the provider changes so unsupported items never leak between
+/// provider layouts.
+@MainActor
 final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSToolbarItemValidation {
-    static let toolbarIdentifier = "ClaudeDesktopMainToolbar"
-
     private weak var coordinator: AppCoordinator?
     private weak var hostWindow: NSWindow?
+    private let provider: LLMProvider
+    private let capabilities: ProviderCapabilities
     private var lastPinnedState: Bool?
 
-    init(coordinator: AppCoordinator, window: NSWindow) {
+    static func toolbarIdentifier(for provider: LLMProvider) -> NSToolbar.Identifier {
+        NSToolbar.Identifier("AIChatMainToolbar.\(provider.rawValue)")
+    }
+
+    init(
+        coordinator: AppCoordinator,
+        window: NSWindow,
+        provider: LLMProvider,
+        capabilities: ProviderCapabilities
+    ) {
         self.coordinator = coordinator
         self.hostWindow = window
+        self.provider = provider
+        self.capabilities = capabilities
         super.init()
     }
 
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        // Spacers between groups break the single fused capsule into separate
-        // Liquid Glass pills (Tahoe behavior).
-        [
-            .cdBack,
+    func toolbarDefaultItemIdentifiers(
+        _ toolbar: NSToolbar
+    ) -> [NSToolbarItem.Identifier] {
+        var identifiers: [NSToolbarItem.Identifier] = [
+            .aiBack,
             .space,
-            .cdHome, .cdNewChat, .cdProjects, .cdClaudeCode,
-            .space,
-            .cdSidebar, .cdSearch,
-            .flexibleSpace,
-            .cdChatBar,
-            .space,
-            .cdGear
+            .aiHome,
+            .aiNewChat,
+            .aiPrivateChat
         ]
+
+        if capabilities.contains(.projects) {
+            identifiers.append(.aiProjects)
+        }
+        if capabilities.contains(.claudeCode) {
+            identifiers.append(.aiClaudeCode)
+        }
+
+        identifiers.append(.space)
+        if capabilities.contains(.sidebar) {
+            identifiers.append(.aiSidebar)
+        }
+        identifiers.append(contentsOf: [.aiSearch, .flexibleSpace, .aiChatBar])
+
+        if capabilities.contains(.providerSettings) {
+            identifiers.append(contentsOf: [.space, .aiProviderSettings])
+        }
+        return identifiers
     }
 
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [
-            .cdBack, .cdForward, .cdHome, .cdNewChat, .cdNewProject, .cdProjects, .cdClaudeCode,
-            .cdSidebar, .cdSearch, .cdAlwaysOnTop, .cdChatBar, .cdGear,
-            .space, .flexibleSpace
+    func toolbarAllowedItemIdentifiers(
+        _ toolbar: NSToolbar
+    ) -> [NSToolbarItem.Identifier] {
+        var identifiers: [NSToolbarItem.Identifier] = [
+            .aiBack,
+            .aiForward,
+            .aiHome,
+            .aiSearch,
+            .aiAlwaysOnTop,
+            .aiChatBar,
+            .space,
+            .flexibleSpace
         ]
+
+        if capabilities.contains(.newChat) {
+            identifiers.append(.aiNewChat)
+        }
+        if capabilities.contains(.privateChat) {
+            identifiers.append(.aiPrivateChat)
+        }
+        if capabilities.contains(.sidebar) {
+            identifiers.append(.aiSidebar)
+        }
+        if capabilities.contains(.newProject) {
+            identifiers.append(.aiNewProject)
+        }
+        if capabilities.contains(.projects) {
+            identifiers.append(.aiProjects)
+        }
+        if capabilities.contains(.claudeCode) {
+            identifiers.append(.aiClaudeCode)
+        }
+        if capabilities.contains(.providerSettings) {
+            identifiers.append(.aiProviderSettings)
+        }
+        return identifiers
     }
 
     func toolbar(
@@ -364,82 +427,164 @@ final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSToolbarItemValid
         willBeInsertedIntoToolbar flag: Bool
     ) -> NSToolbarItem? {
         switch itemIdentifier {
-        case .cdBack:
-            return makeItem(itemIdentifier, symbol: "chevron.left", label: "Back", action: #selector(backAction))
-        case .cdForward:
-            return makeItem(itemIdentifier, symbol: "chevron.right", label: "Forward", action: #selector(forwardAction))
-        case .cdHome:
-            return makeItem(itemIdentifier, symbol: "house", label: "Home", action: #selector(homeAction))
-        case .cdNewChat:
-            return makeItem(itemIdentifier, symbol: "square.and.pencil", label: "New Chat", action: #selector(newChatAction))
-        case .cdNewProject:
-            return makeItem(itemIdentifier, symbol: "folder.badge.plus", label: "New Project", action: #selector(newProjectAction))
-        case .cdProjects:
-            return makeItem(itemIdentifier, symbol: "folder", label: "Projects", action: #selector(projectsAction))
-        case .cdClaudeCode:
-            return makeItem(itemIdentifier, symbol: "chevron.left.forwardslash.chevron.right", label: "Claude Code", action: #selector(claudeCodeAction))
-        case .cdSidebar:
-            return makeItem(itemIdentifier, symbol: "sidebar.left", label: "Sidebar", action: #selector(sidebarAction))
-        case .cdSearch:
+        case .aiBack:
+            return makeItem(
+                itemIdentifier,
+                symbol: "chevron.left",
+                label: "Back",
+                action: #selector(backAction)
+            )
+        case .aiForward:
+            return makeItem(
+                itemIdentifier,
+                symbol: "chevron.right",
+                label: "Forward",
+                action: #selector(forwardAction)
+            )
+        case .aiHome:
+            return makeItem(
+                itemIdentifier,
+                symbol: "house",
+                label: "Home",
+                action: #selector(homeAction)
+            )
+        case .aiNewChat:
+            return makeItem(
+                itemIdentifier,
+                symbol: "square.and.pencil",
+                label: "New Chat",
+                action: #selector(newChatAction)
+            )
+        case .aiPrivateChat:
+            return makeItem(
+                itemIdentifier,
+                symbol: "eye.slash",
+                label: "Private Chat",
+                action: #selector(privateChatAction)
+            )
+        case .aiNewProject:
+            return makeItem(
+                itemIdentifier,
+                symbol: "folder.badge.plus",
+                label: "New Project",
+                action: #selector(newProjectAction)
+            )
+        case .aiProjects:
+            return makeItem(
+                itemIdentifier,
+                symbol: "folder",
+                label: "Projects",
+                action: #selector(projectsAction)
+            )
+        case .aiClaudeCode:
+            return makeItem(
+                itemIdentifier,
+                symbol: "chevron.left.forwardslash.chevron.right",
+                label: "Claude Code",
+                action: #selector(claudeCodeAction)
+            )
+        case .aiSidebar:
+            return makeItem(
+                itemIdentifier,
+                symbol: "sidebar.left",
+                label: "Sidebar",
+                action: #selector(sidebarAction)
+            )
+        case .aiSearch:
             return makeSearchItem(itemIdentifier)
-        case .cdAlwaysOnTop:
+        case .aiAlwaysOnTop:
             let pinned = coordinator?.alwaysOnTop ?? false
             lastPinnedState = pinned
-            return makeItem(itemIdentifier, symbol: pinned ? "pin.fill" : "pin", label: "Always on Top", action: #selector(alwaysOnTopAction))
-        case .cdChatBar:
-            return makeItem(itemIdentifier, symbol: "bubble.left", label: "Chat Bar", action: #selector(chatBarAction))
-        case .cdGear:
-            return makeItem(itemIdentifier, symbol: "gear", label: "Claude Settings", action: #selector(gearAction))
+            return makeItem(
+                itemIdentifier,
+                symbol: pinned ? "pin.fill" : "pin",
+                label: "Always on Top",
+                action: #selector(alwaysOnTopAction)
+            )
+        case .aiChatBar:
+            return makeItem(
+                itemIdentifier,
+                symbol: "bubble.left",
+                label: "Chat Bar",
+                action: #selector(chatBarAction)
+            )
+        case .aiProviderSettings:
+            return makeItem(
+                itemIdentifier,
+                symbol: "gearshape",
+                label: "\(provider.displayName) Settings",
+                action: #selector(providerSettingsAction)
+            )
         default:
-            return nil // .space / .flexibleSpace are provided by the system
+            return nil
         }
     }
-
-    // MARK: - Validation (back/forward enabled state, alwaysOnTop pin icon)
 
     func validateToolbarItem(_ item: NSToolbarItem) -> Bool {
         switch item.itemIdentifier {
-        case .cdBack:
+        case .aiBack:
             return coordinator?.canGoBack ?? false
-        case .cdForward:
+        case .aiForward:
             return coordinator?.canGoForward ?? false
-        case .cdAlwaysOnTop:
+        case .aiAlwaysOnTop:
             let pinned = coordinator?.alwaysOnTop ?? false
             if pinned != lastPinnedState {
                 lastPinnedState = pinned
-                item.image = NSImage(systemSymbolName: pinned ? "pin.fill" : "pin", accessibilityDescription: "Always on Top")
+                item.image = NSImage(
+                    systemSymbolName: pinned ? "pin.fill" : "pin",
+                    accessibilityDescription: "Always on Top"
+                )
             }
             return true
+        case .aiNewChat:
+            return capabilities.contains(.newChat)
+        case .aiPrivateChat:
+            return capabilities.contains(.privateChat)
+        case .aiSidebar:
+            return capabilities.contains(.sidebar)
+        case .aiNewProject:
+            return capabilities.contains(.newProject)
+        case .aiProjects:
+            return capabilities.contains(.projects)
+        case .aiClaudeCode:
+            return capabilities.contains(.claudeCode)
+        case .aiProviderSettings:
+            return capabilities.contains(.providerSettings)
         default:
             return true
         }
     }
 
-    // MARK: - Actions
+    // MARK: Actions
 
     @objc private func backAction() { coordinator?.goBack() }
     @objc private func forwardAction() { coordinator?.goForward() }
     @objc private func homeAction() { coordinator?.goHome() }
     @objc private func newChatAction() { coordinator?.openNewChat() }
+    @objc private func privateChatAction() { coordinator?.openPrivateChat() }
     @objc private func newProjectAction() { coordinator?.openNewProject() }
     @objc private func projectsAction() { coordinator?.openProjects() }
     @objc private func claudeCodeAction() { coordinator?.openClaudeCode() }
     @objc private func sidebarAction() { coordinator?.toggleSidebar() }
+    @objc private func alwaysOnTopAction() { coordinator?.toggleAlwaysOnTop() }
+    @objc private func providerSettingsAction() {
+        coordinator?.openProviderSettings()
+    }
+
     @objc private func searchFieldChanged(_ sender: NSSearchField) {
         let query = sender.stringValue
         guard !query.isEmpty else { return }
         coordinator?.findInPage(query, forward: true) { _ in }
     }
-    @objc private func alwaysOnTopAction() { coordinator?.toggleAlwaysOnTop() }
-    @objc private func gearAction() { coordinator?.openClaudeSettings() }
+
     @objc private func chatBarAction() {
-        if let window = hostWindow, !(window is NSPanel) {
-            window.orderOut(nil)
+        if let hostWindow, !(hostWindow is NSPanel) {
+            hostWindow.orderOut(nil)
         }
         coordinator?.showChatBar()
     }
 
-    // MARK: - Item factory
+    // MARK: Item Factory
 
     private func makeItem(
         _ identifier: NSToolbarItem.Identifier,
@@ -451,16 +596,19 @@ final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSToolbarItemValid
         item.label = label
         item.paletteLabel = label
         item.toolTip = label
-        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+        item.image = NSImage(
+            systemSymbolName: symbol,
+            accessibilityDescription: label
+        )
         item.isBordered = true
         item.target = self
         item.action = action
         return item
     }
 
-    /// A Finder-style search field that collapses to the magnifier glyph and
-    /// expands inline when clicked or when adjacent space is available.
-    private func makeSearchItem(_ identifier: NSToolbarItem.Identifier) -> NSSearchToolbarItem {
+    private func makeSearchItem(
+        _ identifier: NSToolbarItem.Identifier
+    ) -> NSSearchToolbarItem {
         let item = NSSearchToolbarItem(itemIdentifier: identifier)
         item.label = "Find"
         item.paletteLabel = "Find"

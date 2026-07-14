@@ -1,6 +1,6 @@
 //
-//  ClaudeDesktopApp.swift
-//  ClaudeDesktop
+//  AIChatApp.swift
+//  AI Chat
 //
 //  Created by alexcding on 2025-12-13.
 //
@@ -8,27 +8,35 @@
 import SwiftUI
 import KeyboardShortcuts
 import AppKit
-import Combine
 
 // MARK: - Keyboard Shortcut Definition
+
 extension KeyboardShortcuts.Name {
-    static let bringToFront = Self("bringToFront", default: nil)
-    static let bringToFrontWithSelection = Self("bringToFrontWithSelection", default: nil)
+    static let bringToFront = Self(
+        "bringToFront",
+        initial: .init(.space, modifiers: [.option])
+    )
 }
 
 // MARK: - Main App
+
 @main
-struct ClaudeDesktopApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @State var coordinator = AppCoordinator()
-    @Environment(\.openWindow) private var openWindow
+struct AIChatApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @State private var coordinator = AppCoordinator()
 
     var body: some Scene {
         Window(AppCoordinator.Constants.mainWindowTitle, id: Constants.mainWindowID) {
             MainWindowView(coordinator: coordinator)
-                .frame(minWidth: Constants.mainWindowMinWidth, minHeight: Constants.mainWindowMinHeight)
+                .frame(
+                    minWidth: Constants.mainWindowMinWidth,
+                    minHeight: Constants.mainWindowMinHeight
+                )
         }
-        .defaultSize(width: Constants.mainWindowDefaultWidth, height: Constants.mainWindowDefaultHeight)
+        .defaultSize(
+            width: Constants.mainWindowDefaultWidth,
+            height: Constants.mainWindowDefaultHeight
+        )
         .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
             CommandGroup(replacing: .newItem) {
@@ -40,11 +48,55 @@ struct ClaudeDesktopApp: App {
                 .keyboardShortcut("n", modifiers: .command)
 
                 Button {
-                    coordinator.openNewProject()
+                    coordinator.openPrivateChat()
                 } label: {
-                    Label("New Project", systemImage: "folder.badge.plus")
+                    Label("Private Chat", systemImage: "eye.slash")
                 }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
+
+                Button {
+                    coordinator.toggleSidebar()
+                } label: {
+                    Label("Toggle Sidebar", systemImage: "sidebar.left")
+                }
+                .keyboardShortcut(".", modifiers: .command)
+
+                if coordinator.capabilities.contains(.newProject) {
+                    Divider()
+
+                    Button {
+                        coordinator.openNewProject()
+                    } label: {
+                        Label("New Project", systemImage: "folder.badge.plus")
+                    }
+                }
+
+                if coordinator.capabilities.contains(.projects) {
+                    Button {
+                        coordinator.openProjects()
+                    } label: {
+                        Label("Projects", systemImage: "folder")
+                    }
+                }
+
+                if coordinator.capabilities.contains(.claudeCode) {
+                    Button {
+                        coordinator.openClaudeCode()
+                    } label: {
+                        Label("Claude Code", systemImage: "chevron.left.forwardslash.chevron.right")
+                    }
+                }
+
+                if coordinator.capabilities.contains(.providerSettings) {
+                    Button {
+                        coordinator.openProviderSettings()
+                    } label: {
+                        Label(
+                            "\(coordinator.activeProvider.displayName) Settings",
+                            systemImage: "gearshape"
+                        )
+                    }
+                }
             }
 
             CommandGroup(after: .textEditing) {
@@ -130,72 +182,68 @@ struct ClaudeDesktopApp: App {
         Settings {
             SettingsView(coordinator: coordinator)
         }
-        .defaultSize(width: Constants.settingsWindowDefaultWidth, height: Constants.settingsWindowDefaultHeight)
+        .defaultSize(
+            width: Constants.settingsWindowDefaultWidth,
+            height: Constants.settingsWindowDefaultHeight
+        )
 
         MenuBarExtra {
             MenuBarView(coordinator: coordinator)
         } label: {
-            Image("MenuBarPathMonochrome")
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 18, height: 18)
-                .onAppear {
-                    let hideWindowAtLaunch = UserDefaults.standard.bool(forKey: UserDefaultsKeys.hideWindowAtLaunch.rawValue)
-                    let hideDockIcon = UserDefaults.standard.bool(forKey: UserDefaultsKeys.hideDockIcon.rawValue)
-
-                    if hideDockIcon || hideWindowAtLaunch {
-                        NSApp.setActivationPolicy(.accessory)
-                        if hideWindowAtLaunch {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + Constants.hideWindowDelay) {
-                                for window in NSApp.windows {
-                                    if window.identifier?.rawValue == Constants.mainWindowID || window.title == AppCoordinator.Constants.mainWindowTitle {
-                                        window.orderOut(nil)
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        NSApp.setActivationPolicy(.regular)
-                    }
-                }
+            Image(systemName: Constants.menuBarIcon)
+                .symbolRenderingMode(.monochrome)
+                .onAppear(perform: configureLaunchVisibility)
         }
         .menuBarExtraStyle(.menu)
     }
 
     init() {
-        // Apply saved theme on launch
         AppTheme.current.apply()
 
         KeyboardShortcuts.onKeyDown(for: .bringToFront) { [self] in
             coordinator.toggleChatBar()
         }
+    }
 
-        KeyboardShortcuts.onKeyDown(for: .bringToFrontWithSelection) { [self] in
-            coordinator.showChatBarWithSelection()
+    private func configureLaunchVisibility() {
+        let defaults = UserDefaults.standard
+        let hideWindowAtLaunch = defaults.bool(
+            forKey: UserDefaultsKeys.hideWindowAtLaunch.rawValue
+        )
+        let hideDockIcon = defaults.bool(forKey: UserDefaultsKeys.hideDockIcon.rawValue)
+
+        guard hideDockIcon || hideWindowAtLaunch else {
+            NSApp.setActivationPolicy(.regular)
+            return
+        }
+
+        NSApp.setActivationPolicy(.accessory)
+        guard hideWindowAtLaunch else { return }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + Constants.hideWindowDelay) {
+            for window in NSApp.windows where
+                window.identifier?.rawValue == Constants.mainWindowID ||
+                window.title == AppCoordinator.Constants.mainWindowTitle {
+                window.orderOut(nil)
+            }
         }
     }
 }
 
 // MARK: - Constants
-extension ClaudeDesktopApp {
+
+extension AIChatApp {
     struct Constants {
-        // Main Window
         static let mainWindowMinWidth: CGFloat = 400
         static let mainWindowMinHeight: CGFloat = 300
         static let mainWindowDefaultWidth: CGFloat = 1000
         static let mainWindowDefaultHeight: CGFloat = 700
 
-        // Settings Window
         static let settingsWindowDefaultWidth: CGFloat = 700
         static let settingsWindowDefaultHeight: CGFloat = 600
 
         static let mainWindowID = "main"
-
-        // Appearance
         static let menuBarIcon = "bubble.left.and.bubble.right"
-
-        // Timing
         static let hideWindowDelay: TimeInterval = 0.1
     }
 }

@@ -1,28 +1,31 @@
 //
 //  WebViewModel.swift
-//  ClaudeDesktop
-//
-//  Created by alexcding on 2025-12-15.
+//  AI Chat
 //
 
 import AppKit
+import Foundation
+import Observation
 import WebKit
-import Combine
 
-/// Handles console.log messages from JavaScript
-class ConsoleLogHandler: NSObject, WKScriptMessageHandler {
-    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+final class ConsoleLogHandler: NSObject, WKScriptMessageHandler {
+    func userContentController(
+        _ userContentController: WKUserContentController,
+        didReceive message: WKScriptMessage
+    ) {
         if let body = message.body as? String {
             print("[WebView] \(body)")
         }
     }
 }
 
-/// Handles MutationObserver-driven conversation state pushes from the page
 final class ConversationStateHandler: NSObject, WKScriptMessageHandler {
     weak var model: WebViewModel?
 
-    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+    func userContentController(
+        _ userContentController: WKUserContentController,
+        didReceive message: WKScriptMessage
+    ) {
         guard let body = message.body as? [String: Any],
               let inConversation = body["inConversation"] as? Bool else { return }
         DispatchQueue.main.async { [weak self] in
@@ -31,210 +34,254 @@ final class ConversationStateHandler: NSObject, WKScriptMessageHandler {
     }
 }
 
-/// Observable wrapper around WKWebView for the Claude web app
+/// Owns the single active provider session. Provider login state lives in a
+/// separate persistent WebKit data store, while inactive providers have no
+/// WKWebView or WebContent process.
 @Observable
-class WebViewModel {
-
-    // MARK: - Constants
-
-    static let claudeHomeURL = URL(string: "https://claude.ai/new")!
-    static let claudeProjectsURL = URL(string: "https://claude.ai/projects")!
-    static let claudeCodeURL = URL(string: "https://claude.ai/code")!
+final class WebViewModel {
     static let defaultPageZoom: Double = 1.0
+    static let claudeHomeURL = URL(string: "https://claude.ai/new")!
+    static let geminiHomeURL = URL(string: "https://gemini.google.com/app")!
+    static let chatGPTHomeURL = URL(string: "https://chatgpt.com/")!
 
-    private static let claudeHosts: Set<String> = ["claude.ai", "www.claude.ai"]
-    private static var userAgent: String { UserAgentOption.currentUserAgentString }
     private static let minZoom: Double = 0.6
     private static let maxZoom: Double = 1.4
-    private static let inactivityTimeout: TimeInterval = 10 * 60 // 10 minutes
+    private static let inactivityTimeout: TimeInterval = 10 * 60
+    private static let providerDataStoreIdentifiers: [LLMProvider: UUID] = [
+        .claude: UUID(uuidString: "A1C4A7DE-9F3E-4B48-96C5-7C680CB57401")!,
+        .gemini: UUID(uuidString: "6E3B9C21-D4F8-4A75-AD12-8519B7E26002")!,
+        .chatgpt: UUID(uuidString: "C8F2D5A4-7B19-4E63-AB20-94D7F6103003")!
+    ]
 
-    // MARK: - Public Properties
+    /// Stable identity for the provider's persistent WebKit store. Internal so
+    /// the app's tests can verify separation without exposing storage publicly.
+    static func dataStoreIdentifier(for provider: LLMProvider) -> UUID {
+        guard let identifier = providerDataStoreIdentifiers[provider] else {
+            preconditionFailure("Missing WebKit data store identifier for \(provider.rawValue)")
+        }
+        return identifier
+    }
 
-    /// The active web view. Reassigned on suspend/resume so that the WebContent
-    /// process is fully released while the user is idle.
+    private(set) var provider: LLMProvider
+    var capabilities: ProviderCapabilities { provider.capabilities }
+
+    /// Changes identity whenever the provider changes or an idle session resumes.
     private(set) var wkWebView: WKWebView
-    private(set) var canGoBack: Bool = false
-    private(set) var canGoForward: Bool = false
-    private(set) var isAtHome: Bool = true
-    private(set) var isLoading: Bool = true
-    private(set) var isInConversation: Bool = false
+    private(set) var canGoBack = false
+    private(set) var canGoForward = false
+    private(set) var isAtHome = true
+    private(set) var isLoading = true
+    private(set) var isInConversation = false
+    private(set) var isSuspended = false
 
-    /// Called once when the page transitions from start-page → in-conversation.
     var onConversationStarted: (() -> Void)?
 
-    // MARK: - Private Properties
-
+    private var adapter: any ProviderAdapter
+    private let consoleLogHandler: ConsoleLogHandler
+    private let conversationStateHandler: ConversationStateHandler
     private var backObserver: NSKeyValueObservation?
     private var forwardObserver: NSKeyValueObservation?
     private var urlObserver: NSKeyValueObservation?
     private var loadingObserver: NSKeyValueObservation?
-    private let consoleLogHandler = ConsoleLogHandler()
-    private let conversationStateHandler = ConversationStateHandler()
     private var inactivityTimer: Timer?
-    private(set) var isSuspended: Bool = false
+    private var pendingPrivateChatProvider: LLMProvider?
 
-    // MARK: - Initialization
+    init(provider requestedProvider: LLMProvider? = nil) {
+        let storedProvider = UserDefaults.standard
+            .string(forKey: LLMProvider.defaultsKey)
+            .flatMap(LLMProvider.init(rawValue:))
+        let selectedProvider = requestedProvider ?? storedProvider ?? .claude
+        let selectedAdapter = ProviderAdapters.adapter(for: selectedProvider)
+        let consoleHandler = ConsoleLogHandler()
+        let conversationHandler = ConversationStateHandler()
 
-    init() {
-        self.wkWebView = Self.createFullWebView(
-            consoleLogHandler: consoleLogHandler,
-            conversationStateHandler: conversationStateHandler
+        provider = selectedProvider
+        adapter = selectedAdapter
+        consoleLogHandler = consoleHandler
+        conversationStateHandler = conversationHandler
+        wkWebView = Self.makeFullWebView(
+            provider: selectedProvider,
+            adapter: selectedAdapter,
+            consoleLogHandler: consoleHandler,
+            conversationStateHandler: conversationHandler
         )
+
         conversationStateHandler.model = self
+        UserDefaults.standard.set(selectedProvider.rawValue, forKey: LLMProvider.defaultsKey)
         setupObservers()
         loadHome()
         resetInactivityTimer()
     }
 
-    // MARK: - Navigation
+    deinit {
+        inactivityTimer?.invalidate()
+        teardownObservers()
+        detachAndStop(wkWebView)
+    }
+
+    // MARK: - Provider session
+
+    /// Tears down the current provider's only WebView, then creates the selected
+    /// provider at its home page. Only cookies/site data survive via its data store.
+    func switchProvider(to newProvider: LLMProvider) {
+        resetInactivityTimer()
+        guard newProvider != provider else {
+            resumeIfSuspended()
+            return
+        }
+
+        pendingPrivateChatProvider = nil
+        teardownObservers()
+        detachAndStop(wkWebView)
+
+        provider = newProvider
+        adapter = ProviderAdapters.adapter(for: newProvider)
+        UserDefaults.standard.set(newProvider.rawValue, forKey: LLMProvider.defaultsKey)
+        isSuspended = false
+        resetNavigationState(loading: true)
+        wkWebView = Self.makeFullWebView(
+            provider: newProvider,
+            adapter: adapter,
+            consoleLogHandler: consoleLogHandler,
+            conversationStateHandler: conversationStateHandler
+        )
+        setupObservers()
+        loadHome()
+    }
+
+    /// Removes website records for every provider store and rebuilds the
+    /// active session so no authenticated in-memory page survives the reset.
+    func clearAllWebsiteData(completion: @escaping () -> Void = {}) {
+        let group = DispatchGroup()
+        let dataTypes = WKWebsiteDataStore.allWebsiteDataTypes()
+
+        for provider in LLMProvider.allCases {
+            group.enter()
+            Self.websiteDataStore(for: provider).removeData(
+                ofTypes: dataTypes,
+                modifiedSince: .distantPast
+            ) {
+                group.leave()
+            }
+        }
+
+        group.notify(queue: .main) { [weak self] in
+            if let self {
+                self.rebuildActiveSessionAndLoadHome()
+            }
+            completion()
+        }
+    }
+
+    // MARK: - Navigation and provider actions
 
     func loadHome() {
+        resumeIfSuspended()
+        pendingPrivateChatProvider = nil
         isAtHome = true
         canGoBack = false
-        wkWebView.load(URLRequest(url: Self.claudeHomeURL))
-    }
-
-    func loadProjects() {
-        isAtHome = false
-        wkWebView.load(URLRequest(url: Self.claudeProjectsURL))
-    }
-
-    func loadClaudeCode() {
-        isAtHome = false
-        wkWebView.load(URLRequest(url: Self.claudeCodeURL))
-    }
-
-    /// True when the current page is Claude Code (claude.ai/code or any subpath).
-    var isOnClaudeCode: Bool {
-        guard let url = wkWebView.url,
-              let host = url.host?.lowercased(),
-              Self.claudeHosts.contains(host) else { return false }
-        let path = url.path
-        return path == "/code" || path.hasPrefix("/code/")
+        isInConversation = false
+        wkWebView.load(URLRequest(url: adapter.homeURL))
     }
 
     func goBack() {
+        resumeIfSuspended()
+        guard wkWebView.canGoBack else { return }
         isAtHome = false
         wkWebView.goBack()
     }
 
     func goForward() {
+        resumeIfSuspended()
+        guard wkWebView.canGoForward else { return }
         wkWebView.goForward()
     }
 
     func reload() {
+        resumeIfSuspended()
         wkWebView.reload()
     }
 
     func openNewChat() {
-        dispatchKeyboardShortcut(key: "o", code: "KeyO", keyCode: 79, shift: true, meta: true)
+        resumeIfSuspended()
+        pendingPrivateChatProvider = nil
+        adapter.openNewChat(in: wkWebView)
+    }
+
+    func openPrivateChat() {
+        resumeIfSuspended()
+        guard capabilities.contains(.privateChat) else { return }
+
+        if adapter.privateChatStartsAtHome {
+            if let url = wkWebView.url,
+               adapter.isHomeSurface(url),
+               !wkWebView.isLoading {
+                adapter.activatePrivateChat(in: wkWebView)
+            } else {
+                pendingPrivateChatProvider = provider
+                isAtHome = true
+                canGoBack = false
+                wkWebView.load(URLRequest(url: adapter.homeURL))
+            }
+        } else {
+            adapter.activatePrivateChat(in: wkWebView)
+        }
+    }
+
+    /// Compatibility name for the former Gemini-specific command.
+    func openTemporaryChat() {
+        openPrivateChat()
+    }
+
+    func toggleSidebar() {
+        resumeIfSuspended()
+        guard capabilities.contains(.sidebar) else { return }
+        adapter.toggleSidebar(in: wkWebView)
     }
 
     func openNewProject() {
-        dispatchKeyboardShortcut(key: "i", code: "KeyI", keyCode: 73, shift: true, meta: true)
+        resumeIfSuspended()
+        guard capabilities.contains(.newProject) else { return }
+        adapter.openNewProject(in: wkWebView)
     }
 
-    /// Toggles the page's left sidebar. Classic Claude.ai listens for Cmd+. so
-    /// we synthesize that keystroke. Claude Code (claude.ai/code) wires its
-    /// Cmd+B shortcut in a way that does not pick up synthetic events, so we
-    /// click the sidebar trigger directly via the DOM with a synthetic-key
-    /// fallback for layout changes.
-    func toggleSidebar() {
-        if isOnClaudeCode {
-            clickClaudeCodeSidebarToggle()
-        } else {
-            dispatchKeyboardShortcut(key: ".", code: "Period", keyCode: 190, shift: false, meta: true)
-        }
+    func loadProjects() {
+        resumeIfSuspended()
+        guard capabilities.contains(.projects), let url = adapter.projectsURL() else { return }
+        wkWebView.load(URLRequest(url: url))
     }
 
-    /// Finds and clicks Claude Code's sidebar toggle button. Tries a series of
-    /// selectors that cover Radix/shadcn-style sidebars and aria-label variants;
-    /// if none match, falls back to dispatching Cmd+B.
-    private func clickClaudeCodeSidebarToggle() {
-        let script = """
-        (function() {
-            const selectors = [
-                '[data-sidebar="trigger"]',
-                'button[data-sidebar="trigger"]',
-                'button[aria-label="Toggle Sidebar"]',
-                'button[aria-label="Toggle sidebar"]',
-                'button[aria-label*="toggle sidebar" i]',
-                'button[aria-label*="open sidebar" i]',
-                'button[aria-label*="close sidebar" i]',
-                'button[aria-label*="hide sidebar" i]',
-                'button[aria-label*="show sidebar" i]',
-                'button[aria-label*="sidebar" i]',
-                'button[aria-label*="navigation" i]',
-                'button[title*="sidebar" i]',
-                'button[data-testid*="sidebar" i]'
-            ];
-            for (const sel of selectors) {
-                const btn = document.querySelector(sel);
-                if (btn) {
-                    btn.click();
-                    return true;
-                }
-            }
-            return false;
-        })();
-        """
-        wkWebView.evaluateJavaScript(script) { [weak self] result, _ in
-            // If no matching button was found, fall back to dispatching Cmd+B.
-            if (result as? Bool) == false {
-                self?.dispatchKeyboardShortcut(key: "b", code: "KeyB", keyCode: 66, shift: false, meta: true)
-            }
-        }
+    func loadClaudeCode() {
+        resumeIfSuspended()
+        guard capabilities.contains(.claudeCode), let url = adapter.codeURL() else { return }
+        wkWebView.load(URLRequest(url: url))
     }
 
-    /// Opens Claude.ai's website settings panel by dispatching its in-page shortcut (Shift+Cmd+,).
+    var isOnClaudeCode: Bool {
+        provider == .claude && adapter.page(for: wkWebView.url ?? adapter.homeURL) == .code
+    }
+
+    func openProviderSettings() {
+        resumeIfSuspended()
+        guard capabilities.contains(.providerSettings) else { return }
+        adapter.openProviderSettings(in: wkWebView)
+    }
+
+    /// Compatibility for existing coordinator call sites.
     func openClaudeSettings() {
-        dispatchKeyboardShortcut(key: ",", code: "Comma", keyCode: 188, shift: true, meta: true)
+        openProviderSettings()
     }
 
-    /// Dispatches a synthetic keydown event into the page so the page's own
-    /// shortcut handlers fire. Some surfaces (e.g. Claude Code at claude.ai/code)
-    /// register on `window`; classic Claude listens on `document`. Fire on both
-    /// plus the active element so all listener strategies pick it up.
-    private func dispatchKeyboardShortcut(key: String, code: String, keyCode: Int, shift: Bool, meta: Bool) {
-        let script = """
-        (function() {
-            function makeEvent() {
-                return new KeyboardEvent('keydown', {
-                    key: \(jsString(key)),
-                    code: \(jsString(code)),
-                    keyCode: \(keyCode),
-                    which: \(keyCode),
-                    shiftKey: \(shift ? "true" : "false"),
-                    metaKey: \(meta ? "true" : "false"),
-                    ctrlKey: false,
-                    altKey: false,
-                    bubbles: true,
-                    cancelable: true,
-                    composed: true
-                });
-            }
-            const targets = [window, document, document.body, document.activeElement];
-            for (const t of targets) {
-                if (t && typeof t.dispatchEvent === 'function') {
-                    t.dispatchEvent(makeEvent());
-                }
-            }
-        })();
-        """
-        wkWebView.evaluateJavaScript(script, completionHandler: nil)
-    }
-
-    /// JSON-encodes a string for safe interpolation into a JS source literal.
-    private func jsString(_ value: String) -> String {
-        guard let data = try? JSONSerialization.data(withJSONObject: [value]),
-              let json = String(data: data, encoding: .utf8) else { return "\"\"" }
-        return String(json.dropFirst().dropLast())
-    }
-
-    // MARK: - Find in page
-
-    func findInPage(_ query: String, forward: Bool, completion: @escaping (Bool) -> Void) {
-        guard !query.isEmpty else { completion(false); return }
+    func findInPage(
+        _ query: String,
+        forward: Bool,
+        completion: @escaping (Bool) -> Void
+    ) {
+        guard !query.isEmpty else {
+            completion(false)
+            return
+        }
+        resumeIfSuspended()
         let configuration = WKFindConfiguration()
         configuration.backwards = !forward
         configuration.caseSensitive = false
@@ -244,67 +291,29 @@ class WebViewModel {
         }
     }
 
-    /// Inserts text into the Claude composer (ProseMirror contenteditable).
-    /// Retries for a short window so it works even while the page is still loading.
-    func insertTextIntoComposer(_ text: String) {
-        guard let payload = try? JSONSerialization.data(withJSONObject: [text]),
-              let jsonArray = String(data: payload, encoding: .utf8) else { return }
-
-        let script = """
-        (function(payload) {
-            const text = payload[0];
-            const MAX_TRIES = 40;
-            const INTERVAL_MS = 75;
-            let tries = 0;
-
-            function findEditor() {
-                return document.querySelector('div.ProseMirror[contenteditable="true"]')
-                    || document.querySelector('div[contenteditable="true"]');
-            }
-
-            function attempt() {
-                const editor = findEditor();
-                if (!editor) {
-                    if (++tries < MAX_TRIES) setTimeout(attempt, INTERVAL_MS);
-                    return;
-                }
-                editor.focus();
-                try {
-                    const dt = new DataTransfer();
-                    dt.setData('text/plain', text);
-                    const evt = new ClipboardEvent('paste', {
-                        bubbles: true, cancelable: true, clipboardData: dt
-                    });
-                    const delivered = editor.dispatchEvent(evt);
-                    if (delivered && !evt.defaultPrevented) {
-                        document.execCommand('insertText', false, text);
-                    }
-                } catch (e) {
-                    document.execCommand('insertText', false, text);
-                }
-            }
-            attempt();
-        })(\(jsonArray));
-        """
-        wkWebView.evaluateJavaScript(script, completionHandler: nil)
-    }
-
-    /// Focuses the page's primary input field. Used by the chat bar on appearance.
     func focusComposer() {
-        let script = """
-        (function() {
-            const input = document.querySelector('div[contenteditable="true"][data-placeholder]') ||
-                          document.querySelector('textarea[placeholder*="Message"]') ||
-                          document.querySelector('textarea[placeholder*="Reply"]') ||
-                          document.querySelector('[contenteditable="true"]') ||
-                          document.querySelector('textarea');
-            if (input) { input.focus(); }
-        })();
-        """
-        wkWebView.evaluateJavaScript(script, completionHandler: nil)
+        resumeIfSuspended()
+        adapter.focusComposer(in: wkWebView)
     }
 
-    // MARK: - Conversation State (push from JS)
+    // MARK: - Browser policy API
+
+    func classification(for url: URL) -> ProviderURLClassification {
+        adapter.classify(url)
+    }
+
+    func shouldOpenExternally(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        if ["about", "blob", "data", "javascript"].contains(scheme) { return false }
+        guard scheme == "http" || scheme == "https" else { return true }
+        return adapter.classify(url) == .external
+    }
+
+    func allowsMediaCapture(from host: String) -> Bool {
+        adapter.allowsMediaCapture(from: host)
+    }
+
+    // MARK: - Conversation state
 
     func handleConversationState(_ inConversation: Bool) {
         let wasInConversation = isInConversation
@@ -314,66 +323,69 @@ class WebViewModel {
         }
     }
 
-    // MARK: - Inactivity Suspension
+    // MARK: - Inactivity suspension
 
     func resetInactivityTimer() {
         inactivityTimer?.invalidate()
-        inactivityTimer = Timer.scheduledTimer(withTimeInterval: Self.inactivityTimeout, repeats: false) { [weak self] _ in
-            DispatchQueue.main.async { self?.suspendIfInactive() }
+        inactivityTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.inactivityTimeout,
+            repeats: false
+        ) { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.suspendIfInactive()
+            }
         }
     }
 
     private func suspendIfInactive() {
         guard !isSuspended else { return }
-        // Don't suspend while any regular app window is visible to the user.
-        // Exclude menu bar extra windows (they sit at statusBar level and above,
-        // and are always "visible" even when the app is hidden).
-        if NSApp.windows.contains(where: { $0.isVisible && !$0.isMiniaturized && $0.level <= .floating }) {
+        let hasVisibleRegularWindow = NSApp.windows.contains {
+            $0.isVisible && !$0.isMiniaturized && $0.level <= .floating
+        }
+        guard !hasVisibleRegularWindow else {
             resetInactivityTimer()
             return
         }
+
         isSuspended = true
-        // Tear down the WebContent process by replacing the WKWebView with a
-        // minimal, unloaded instance. The previous instance (and its process)
-        // is released as soon as no view holds it — and since suspension only
-        // fires when no app windows are visible, no view does.
+        pendingPrivateChatProvider = nil
         teardownObservers()
-        wkWebView.stopLoading()
-        wkWebView.navigationDelegate = nil
-        wkWebView.uiDelegate = nil
-        wkWebView = Self.createIdleWebView()
-        canGoBack = false
-        canGoForward = false
-        isAtHome = true
-        isLoading = false
-        isInConversation = false
+        detachAndStop(wkWebView)
+        wkWebView = Self.makeIdleWebView(provider: provider)
+        resetNavigationState(loading: false)
     }
 
     func resumeIfSuspended() {
         resetInactivityTimer()
         guard isSuspended else { return }
         isSuspended = false
-        wkWebView = Self.createFullWebView(
+        resetNavigationState(loading: true)
+        wkWebView = Self.makeFullWebView(
+            provider: provider,
+            adapter: adapter,
             consoleLogHandler: consoleLogHandler,
             conversationStateHandler: conversationStateHandler
         )
         setupObservers()
-        loadHome()
+        wkWebView.load(URLRequest(url: adapter.homeURL))
     }
 
-    // MARK: - Zoom
+    // MARK: - Shared zoom and user agent
 
     func zoomIn() {
-        let newZoom = min((wkWebView.pageZoom * 100 + 1).rounded() / 100, Self.maxZoom)
-        setZoom(newZoom)
+        resumeIfSuspended()
+        let zoom = min((wkWebView.pageZoom * 100 + 1).rounded() / 100, Self.maxZoom)
+        setZoom(zoom)
     }
 
     func zoomOut() {
-        let newZoom = max((wkWebView.pageZoom * 100 - 1).rounded() / 100, Self.minZoom)
-        setZoom(newZoom)
+        resumeIfSuspended()
+        let zoom = max((wkWebView.pageZoom * 100 - 1).rounded() / 100, Self.minZoom)
+        setZoom(zoom)
     }
 
     func resetZoom() {
+        resumeIfSuspended()
         setZoom(Self.defaultPageZoom)
     }
 
@@ -383,52 +395,98 @@ class WebViewModel {
     }
 
     func applyUserAgent() {
-        let newUA = Self.userAgent
-        guard wkWebView.customUserAgent != newUA else { return }
-        wkWebView.customUserAgent = newUA
+        guard !isSuspended else { return }
+        let userAgent = UserAgentOption.currentUserAgentString
+        guard wkWebView.customUserAgent != userAgent else { return }
+        wkWebView.customUserAgent = userAgent
         wkWebView.reload()
     }
 
-    // MARK: - Private Setup
+    // MARK: - WebView lifecycle
 
-    /// Builds a fully configured WKWebView with scripts, handlers, and saved zoom.
-    private static func createFullWebView(
+    private func rebuildActiveSessionAndLoadHome() {
+        teardownObservers()
+        detachAndStop(wkWebView)
+        isSuspended = false
+        pendingPrivateChatProvider = nil
+        resetNavigationState(loading: true)
+        wkWebView = Self.makeFullWebView(
+            provider: provider,
+            adapter: adapter,
+            consoleLogHandler: consoleLogHandler,
+            conversationStateHandler: conversationStateHandler
+        )
+        setupObservers()
+        wkWebView.load(URLRequest(url: adapter.homeURL))
+        resetInactivityTimer()
+    }
+
+    private func resetNavigationState(loading: Bool) {
+        canGoBack = false
+        canGoForward = false
+        isAtHome = true
+        isLoading = loading
+        isInConversation = false
+    }
+
+    private func detachAndStop(_ webView: WKWebView) {
+        webView.stopLoading()
+        webView.removeFromSuperview()
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
+        let controller = webView.configuration.userContentController
+        controller.removeScriptMessageHandler(forName: UserScripts.conversationStateHandler)
+        #if DEBUG
+        controller.removeScriptMessageHandler(forName: UserScripts.consoleLogHandler)
+        #endif
+        controller.removeAllUserScripts()
+    }
+
+    private static func makeFullWebView(
+        provider: LLMProvider,
+        adapter: any ProviderAdapter,
         consoleLogHandler: ConsoleLogHandler,
         conversationStateHandler: ConversationStateHandler
     ) -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .default()
+        configuration.websiteDataStore = websiteDataStore(for: provider)
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
 
-        for script in UserScripts.createAllScripts() {
+        for script in UserScripts.createAllScripts(for: adapter) {
             configuration.userContentController.addUserScript(script)
         }
-
-        configuration.userContentController.add(conversationStateHandler, name: UserScripts.conversationStateHandler)
-
+        configuration.userContentController.add(
+            conversationStateHandler,
+            name: UserScripts.conversationStateHandler
+        )
         #if DEBUG
-        configuration.userContentController.add(consoleLogHandler, name: UserScripts.consoleLogHandler)
+        configuration.userContentController.add(
+            consoleLogHandler,
+            name: UserScripts.consoleLogHandler
+        )
         #endif
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsLinkPreview = true
         webView.allowsMagnification = true
-        webView.customUserAgent = userAgent
+        webView.customUserAgent = UserAgentOption.currentUserAgentString
 
         let savedZoom = UserDefaults.standard.double(forKey: UserDefaultsKeys.pageZoom.rawValue)
         webView.pageZoom = savedZoom > 0 ? savedZoom : defaultPageZoom
-
         return webView
     }
 
-    /// Builds a minimal idle WKWebView used as a placeholder during suspension.
-    /// No scripts, no handlers, no loaded URL — its WebContent process stays unspawned.
-    private static func createIdleWebView() -> WKWebView {
+    private static func makeIdleWebView(provider: LLMProvider) -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .default()
+        configuration.websiteDataStore = websiteDataStore(for: provider)
         return WKWebView(frame: .zero, configuration: configuration)
+    }
+
+    private static func websiteDataStore(for provider: LLMProvider) -> WKWebsiteDataStore {
+        WKWebsiteDataStore(forIdentifier: dataStoreIdentifier(for: provider))
     }
 
     private func teardownObservers() {
@@ -445,54 +503,48 @@ class WebViewModel {
     private func setupObservers() {
         teardownObservers()
 
-        backObserver = wkWebView.observe(\.canGoBack, options: [.new, .initial]) { [weak self] webView, _ in
+        backObserver = wkWebView.observe(\.canGoBack, options: [.new, .initial]) {
+            [weak self] webView, _ in
             DispatchQueue.main.async {
-                guard let self = self else { return }
+                guard let self, webView === self.wkWebView else { return }
                 self.canGoBack = !self.isAtHome && webView.canGoBack
             }
         }
-
-        forwardObserver = wkWebView.observe(\.canGoForward, options: [.new, .initial]) { [weak self] webView, _ in
+        forwardObserver = wkWebView.observe(\.canGoForward, options: [.new, .initial]) {
+            [weak self] webView, _ in
             DispatchQueue.main.async {
-                guard let self = self else { return }
+                guard let self, webView === self.wkWebView else { return }
                 self.canGoForward = webView.canGoForward
             }
         }
-
-        loadingObserver = wkWebView.observe(\.isLoading, options: [.new, .initial]) { [weak self] webView, _ in
+        loadingObserver = wkWebView.observe(\.isLoading, options: [.new, .initial]) {
+            [weak self] webView, _ in
             DispatchQueue.main.async {
-                self?.isLoading = webView.isLoading
+                guard let self, webView === self.wkWebView else { return }
+                self.isLoading = webView.isLoading
+                if !webView.isLoading {
+                    self.performPendingPrivateChatIfReady()
+                }
             }
         }
-
-        urlObserver = wkWebView.observe(\.url, options: .new) { [weak self] webView, _ in
+        urlObserver = wkWebView.observe(\.url, options: [.new]) {
+            [weak self] webView, _ in
             DispatchQueue.main.async {
-                guard let self = self else { return }
-                guard let currentURL = webView.url else { return }
-
-                // Reset inactivity timer on real navigation, not on the suspend blank load
-                if currentURL.absoluteString != "about:blank" && !self.isSuspended {
+                guard let self, webView === self.wkWebView, let url = webView.url else { return }
+                if url.absoluteString != "about:blank" && !self.isSuspended {
                     self.resetInactivityTimer()
                 }
-
-                let onClaudeHomeSurface = Self.isClaudeHomeSurface(currentURL)
-
-                if onClaudeHomeSurface {
-                    self.isAtHome = true
-                    self.canGoBack = false
-                } else {
-                    self.isAtHome = false
-                    self.canGoBack = webView.canGoBack
-                }
+                self.isAtHome = self.adapter.isHomeSurface(url)
+                self.canGoBack = !self.isAtHome && webView.canGoBack
             }
         }
     }
 
-    private static func isClaudeHomeSurface(_ url: URL) -> Bool {
-        guard let host = url.host?.lowercased(), claudeHosts.contains(host) else { return false }
-        let path = url.path
-        if path == "/" || path == "/new" { return true }
-        if path.hasPrefix("/chat") { return true }
-        return false
+    private func performPendingPrivateChatIfReady() {
+        guard pendingPrivateChatProvider == provider,
+              let url = wkWebView.url,
+              adapter.isHomeSurface(url) else { return }
+        pendingPrivateChatProvider = nil
+        adapter.activatePrivateChat(in: wkWebView)
     }
 }

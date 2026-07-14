@@ -1,17 +1,17 @@
 #!/bin/bash
 
-# Create DMG for Claude Desktop
-# Usage: ./scripts/create-dmg.sh [path/to/Claude Desktop.app] [output_dir]
-# Defaults: ~/Downloads/ClaudeDesktop for both app parent and DMG output
+# Create a DMG for AI Chat.
+# Usage: ./scripts/create-dmg.sh [path/to/AI Chat.app] [output_dir]
+# Defaults: ~/Downloads/AIChat for both the app parent and DMG output.
 
-set -e
+set -euo pipefail
 
-APP_NAME="Claude Desktop"
-DEFAULT_DIR="$HOME/Downloads/ClaudeDesktop"
+APP_NAME="AI Chat"
+DEFAULT_DIR="$HOME/Downloads/AIChat"
 APP_PATH="${1:-$DEFAULT_DIR/${APP_NAME}.app}"
 OUTPUT_DIR="${2:-$DEFAULT_DIR}"
-DMG_FINAL="${OUTPUT_DIR}/ClaudeDesktop.dmg"
-VOLUME_NAME="Claude Desktop"
+DMG_FINAL="${OUTPUT_DIR}/AIChat.dmg"
+VOLUME_NAME="AI Chat"
 
 echo "Creating DMG for ${APP_NAME}..."
 
