@@ -182,11 +182,6 @@ struct ClaudeProviderAdapter: ProviderAdapter {
     }
     """
 
-    private func normalizedPath(_ path: String) -> String {
-        guard path.count > 1, path.hasSuffix("/") else { return path }
-        return String(path.dropLast())
-    }
-
     private func retryingClickScript(selectors: [String], actionName: String) -> String {
         let encoded = selectors.compactMap { selector -> String? in
             guard let data = try? JSONSerialization.data(withJSONObject: selector) else { return nil }

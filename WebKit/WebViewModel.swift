@@ -40,26 +40,21 @@ final class ConversationStateHandler: NSObject, WKScriptMessageHandler {
 @Observable
 final class WebViewModel {
     static let defaultPageZoom: Double = 1.0
-    static let claudeHomeURL = URL(string: "https://claude.ai/new")!
-    static let geminiHomeURL = URL(string: "https://gemini.google.com/app")!
-    static let chatGPTHomeURL = URL(string: "https://chatgpt.com/")!
 
     private static let minZoom: Double = 0.6
     private static let maxZoom: Double = 1.4
     private static let inactivityTimeout: TimeInterval = 10 * 60
-    private static let providerDataStoreIdentifiers: [LLMProvider: UUID] = [
-        .claude: UUID(uuidString: "A1C4A7DE-9F3E-4B48-96C5-7C680CB57401")!,
-        .gemini: UUID(uuidString: "6E3B9C21-D4F8-4A75-AD12-8519B7E26002")!,
-        .chatgpt: UUID(uuidString: "C8F2D5A4-7B19-4E63-AB20-94D7F6103003")!
-    ]
 
     /// Stable identity for the provider's persistent WebKit store. Internal so
     /// the app's tests can verify separation without exposing storage publicly.
+    /// A `switch` rather than a lookup table so adding a provider fails to
+    /// compile instead of trapping the first time that provider is selected.
     static func dataStoreIdentifier(for provider: LLMProvider) -> UUID {
-        guard let identifier = providerDataStoreIdentifiers[provider] else {
-            preconditionFailure("Missing WebKit data store identifier for \(provider.rawValue)")
+        switch provider {
+        case .claude: return UUID(uuidString: "A1C4A7DE-9F3E-4B48-96C5-7C680CB57401")!
+        case .gemini: return UUID(uuidString: "6E3B9C21-D4F8-4A75-AD12-8519B7E26002")!
+        case .chatgpt: return UUID(uuidString: "C8F2D5A4-7B19-4E63-AB20-94D7F6103003")!
         }
-        return identifier
     }
 
     private(set) var provider: LLMProvider
@@ -84,6 +79,9 @@ final class WebViewModel {
     private var urlObserver: NSKeyValueObservation?
     private var loadingObserver: NSKeyValueObservation?
     private var inactivityTimer: Timer?
+    private var occlusionObserver: NSObjectProtocol?
+    private var lastActivity = Date()
+    private var suspendedURL: URL?
     private var pendingPrivateChatProvider: LLMProvider?
 
     init(provider requestedProvider: LLMProvider? = nil) {
@@ -111,10 +109,14 @@ final class WebViewModel {
         setupObservers()
         loadHome()
         resetInactivityTimer()
+        observeOcclusionChanges()
     }
 
     deinit {
         inactivityTimer?.invalidate()
+        if let occlusionObserver {
+            NotificationCenter.default.removeObserver(occlusionObserver)
+        }
         teardownObservers()
         detachAndStop(wkWebView)
     }
@@ -131,6 +133,7 @@ final class WebViewModel {
         }
 
         pendingPrivateChatProvider = nil
+        suspendedURL = nil
         teardownObservers()
         detachAndStop(wkWebView)
 
@@ -146,6 +149,7 @@ final class WebViewModel {
             conversationStateHandler: conversationStateHandler
         )
         setupObservers()
+        notifyHostsOfWebViewChange()
         loadHome()
     }
 
@@ -157,7 +161,7 @@ final class WebViewModel {
 
         for provider in LLMProvider.allCases {
             group.enter()
-            Self.websiteDataStore(for: provider).removeData(
+            Self.transientWebsiteDataStore(for: provider).removeData(
                 ofTypes: dataTypes,
                 modifiedSince: .distantPast
             ) {
@@ -184,9 +188,14 @@ final class WebViewModel {
         wkWebView.load(URLRequest(url: adapter.homeURL))
     }
 
+    // Navigating away abandons a private-chat request that was waiting for the
+    // home page to finish loading. Leaving it armed would activate the private
+    // chat unprompted the next time the user happened to reach a home surface.
+
     func goBack() {
         resumeIfSuspended()
         guard wkWebView.canGoBack else { return }
+        pendingPrivateChatProvider = nil
         isAtHome = false
         wkWebView.goBack()
     }
@@ -194,11 +203,13 @@ final class WebViewModel {
     func goForward() {
         resumeIfSuspended()
         guard wkWebView.canGoForward else { return }
+        pendingPrivateChatProvider = nil
         wkWebView.goForward()
     }
 
     func reload() {
         resumeIfSuspended()
+        pendingPrivateChatProvider = nil
         wkWebView.reload()
     }
 
@@ -228,11 +239,6 @@ final class WebViewModel {
         }
     }
 
-    /// Compatibility name for the former Gemini-specific command.
-    func openTemporaryChat() {
-        openPrivateChat()
-    }
-
     func toggleSidebar() {
         resumeIfSuspended()
         guard capabilities.contains(.sidebar) else { return }
@@ -257,19 +263,10 @@ final class WebViewModel {
         wkWebView.load(URLRequest(url: url))
     }
 
-    var isOnClaudeCode: Bool {
-        provider == .claude && adapter.page(for: wkWebView.url ?? adapter.homeURL) == .code
-    }
-
     func openProviderSettings() {
         resumeIfSuspended()
         guard capabilities.contains(.providerSettings) else { return }
         adapter.openProviderSettings(in: wkWebView)
-    }
-
-    /// Compatibility for existing coordinator call sites.
-    func openClaudeSettings() {
-        openProviderSettings()
     }
 
     func findInPage(
@@ -326,6 +323,7 @@ final class WebViewModel {
     // MARK: - Inactivity suspension
 
     func resetInactivityTimer() {
+        lastActivity = Date()
         inactivityTimer?.invalidate()
         inactivityTimer = Timer.scheduledTimer(
             withTimeInterval: Self.inactivityTimeout,
@@ -337,29 +335,60 @@ final class WebViewModel {
         }
     }
 
+    /// The app becoming fully occluded is the moment suspension is worth
+    /// re-checking, so an already-idle session is released then instead of
+    /// waiting out the remainder of a timer that would only fire later.
+    private func observeOcclusionChanges() {
+        occlusionObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeOcclusionStateNotification,
+            object: NSApp,
+            queue: .main
+        ) { [weak self] _ in
+            self?.suspendIfInactive()
+        }
+    }
+
+    /// A window that is merely ordered-in still reports `isVisible == true`
+    /// while it sits behind another app, on another Space, or under Hide.
+    /// Occlusion state is what actually reflects whether the page can be seen.
+    private var hasObservableWindow: Bool {
+        NSApp.windows.contains {
+            $0.isVisible
+                && !$0.isMiniaturized
+                && $0.level <= .floating
+                && $0.occlusionState.contains(.visible)
+        }
+    }
+
     private func suspendIfInactive() {
         guard !isSuspended else { return }
-        let hasVisibleRegularWindow = NSApp.windows.contains {
-            $0.isVisible && !$0.isMiniaturized && $0.level <= .floating
-        }
-        guard !hasVisibleRegularWindow else {
+        guard Date().timeIntervalSince(lastActivity) >= Self.inactivityTimeout else { return }
+        guard !hasObservableWindow else {
             resetInactivityTimer()
             return
         }
 
+        // Restored on resume so reclaiming memory never costs the user their place.
+        suspendedURL = wkWebView.url.flatMap { url in
+            url.scheme == "http" || url.scheme == "https" ? url : nil
+        }
         isSuspended = true
         pendingPrivateChatProvider = nil
         teardownObservers()
         detachAndStop(wkWebView)
         wkWebView = Self.makeIdleWebView(provider: provider)
         resetNavigationState(loading: false)
+        notifyHostsOfWebViewChange()
     }
 
     func resumeIfSuspended() {
         resetInactivityTimer()
         guard isSuspended else { return }
         isSuspended = false
+        let restoredURL = suspendedURL ?? adapter.homeURL
+        suspendedURL = nil
         resetNavigationState(loading: true)
+        isAtHome = adapter.isHomeSurface(restoredURL)
         wkWebView = Self.makeFullWebView(
             provider: provider,
             adapter: adapter,
@@ -367,7 +396,8 @@ final class WebViewModel {
             conversationStateHandler: conversationStateHandler
         )
         setupObservers()
-        wkWebView.load(URLRequest(url: adapter.homeURL))
+        wkWebView.load(URLRequest(url: restoredURL))
+        notifyHostsOfWebViewChange()
     }
 
     // MARK: - Shared zoom and user agent
@@ -394,14 +424,6 @@ final class WebViewModel {
         UserDefaults.standard.set(zoom, forKey: UserDefaultsKeys.pageZoom.rawValue)
     }
 
-    func applyUserAgent() {
-        guard !isSuspended else { return }
-        let userAgent = UserAgentOption.currentUserAgentString
-        guard wkWebView.customUserAgent != userAgent else { return }
-        wkWebView.customUserAgent = userAgent
-        wkWebView.reload()
-    }
-
     // MARK: - WebView lifecycle
 
     private func rebuildActiveSessionAndLoadHome() {
@@ -409,6 +431,7 @@ final class WebViewModel {
         detachAndStop(wkWebView)
         isSuspended = false
         pendingPrivateChatProvider = nil
+        suspendedURL = nil
         resetNavigationState(loading: true)
         wkWebView = Self.makeFullWebView(
             provider: provider,
@@ -417,8 +440,20 @@ final class WebViewModel {
             conversationStateHandler: conversationStateHandler
         )
         setupObservers()
+        notifyHostsOfWebViewChange()
         wkWebView.load(URLRequest(url: adapter.homeURL))
         resetInactivityTimer()
+    }
+
+    /// Hands the replacement WebView to every mounted host immediately. Without
+    /// this the off-screen host keeps the previous WebView alive until SwiftUI
+    /// next re-runs its update, which is not guaranteed to be prompt for a
+    /// hidden window.
+    private func notifyHostsOfWebViewChange() {
+        let webView = wkWebView
+        MainActor.assumeIsolated {
+            BrowserWebViewHosts.webViewDidChange(to: webView, for: self)
+        }
     }
 
     private func resetNavigationState(loading: Bool) {
@@ -472,7 +507,6 @@ final class WebViewModel {
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsLinkPreview = true
         webView.allowsMagnification = true
-        webView.customUserAgent = UserAgentOption.currentUserAgentString
 
         let savedZoom = UserDefaults.standard.double(forKey: UserDefaultsKeys.pageZoom.rawValue)
         webView.pageZoom = savedZoom > 0 ? savedZoom : defaultPageZoom
@@ -485,8 +519,31 @@ final class WebViewModel {
         return WKWebView(frame: .zero, configuration: configuration)
     }
 
+    /// Only the active provider's store is cached. Suspend/resume cycles reuse
+    /// one store object instead of standing up a second networking session for
+    /// the same identifier, while switching providers still drops the previous
+    /// store so the provider left behind keeps nothing alive. Main-thread only.
+    private static var cachedStore: (provider: LLMProvider, store: WKWebsiteDataStore)?
+
     private static func websiteDataStore(for provider: LLMProvider) -> WKWebsiteDataStore {
-        WKWebsiteDataStore(forIdentifier: dataStoreIdentifier(for: provider))
+        if let cachedStore, cachedStore.provider == provider {
+            return cachedStore.store
+        }
+        let store = WKWebsiteDataStore(forIdentifier: dataStoreIdentifier(for: provider))
+        cachedStore = (provider, store)
+        return store
+    }
+
+    /// Website data is removed through short-lived stores for the providers that
+    /// are not active, so clearing never promotes an inactive provider's store
+    /// into the cache.
+    private static func transientWebsiteDataStore(
+        for provider: LLMProvider
+    ) -> WKWebsiteDataStore {
+        if let cachedStore, cachedStore.provider == provider {
+            return cachedStore.store
+        }
+        return WKWebsiteDataStore(forIdentifier: dataStoreIdentifier(for: provider))
     }
 
     private func teardownObservers() {

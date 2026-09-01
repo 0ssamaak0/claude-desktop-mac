@@ -10,7 +10,15 @@ import QuartzCore
 
 @MainActor
 final class ChatBarPanel: NSPanel, NSWindowDelegate {
-    private var initialSize: NSSize {
+    private enum PresentationState {
+        case hidden
+        case showing
+        case visible
+        case hiding
+    }
+
+    /// Static so `init` can read the persisted size before `self` is available.
+    private static func storedContentSize() -> NSSize {
         let width = UserDefaults.standard.double(
             forKey: UserDefaultsKeys.panelWidth.rawValue
         )
@@ -23,51 +31,76 @@ final class ChatBarPanel: NSPanel, NSWindowDelegate {
         )
     }
 
+    private var initialContentSize: NSSize {
+        Self.storedContentSize()
+    }
+
+    private var initialPanelSize: NSSize {
+        Self.panelSize(forContentSize: initialContentSize)
+    }
+
     private var currentScreen: NSScreen? {
         NSScreen.screen(containing: NSPoint(x: frame.midX, y: frame.midY))
     }
 
     private var expandedHeight: CGFloat {
         let screenHeight = currentScreen?.visibleFrame.height ?? 800
-        return max(
+        let contentHeight = max(
             screenHeight * Constants.expandedScreenRatio,
-            initialSize.height
+            initialContentSize.height
         )
+        return contentHeight + Constants.chromeExpansion
     }
 
     private var isExpanded = false
+    private var presentationState: PresentationState = .hidden
+    private var presentationGeneration = 0
+    private var presentationFrame: NSRect?
+    private var isProgrammaticTransition = false
+    private var pendingConversationExpansion = false
     private var positionSaveWork: DispatchWorkItem?
     private var sizeSaveWork: DispatchWorkItem?
     private var clickOutsideMonitor: Any?
     private weak var webViewModel: WebViewModel?
+    private let onRequestDismiss: () -> Void
 
-    init(contentView: NSView, webViewModel: WebViewModel) {
-        let width = UserDefaults.standard.double(
-            forKey: UserDefaultsKeys.panelWidth.rawValue
-        )
-        let height = UserDefaults.standard.double(
-            forKey: UserDefaultsKeys.panelHeight.rawValue
-        )
-        let initialWidth = width > 0 ? width : Constants.defaultWidth
-        let initialHeight = height > 0 ? height : Constants.defaultHeight
+    init(
+        contentView hostedContentView: NSView,
+        webViewModel: WebViewModel,
+        onRequestDismiss: @escaping () -> Void
+    ) {
+        let startingPanelSize = Self.panelSize(forContentSize: Self.storedContentSize())
 
         self.webViewModel = webViewModel
+        self.onRequestDismiss = onRequestDismiss
 
         super.init(
             contentRect: NSRect(
                 x: 0,
                 y: 0,
-                width: initialWidth,
-                height: initialHeight
+                width: startingPanelSize.width,
+                height: startingPanelSize.height
             ),
             styleMask: [.nonactivatingPanel, .resizable, .borderless],
             backing: .buffered,
             defer: false
         )
 
-        self.contentView = contentView
-        contentView.frame = contentLayoutRect
-        contentView.autoresizingMask = [.width, .height]
+        let glassView = ChatBarGlassEffectView(frame: contentLayoutRect)
+        let contentContainer = NSView(frame: glassView.bounds)
+        hostedContentView.frame = contentContainer.bounds.insetBy(
+            dx: Constants.glassRimWidth,
+            dy: Constants.glassRimWidth
+        )
+        hostedContentView.autoresizingMask = [.width, .height]
+        hostedContentView.wantsLayer = true
+        hostedContentView.layer?.cornerRadius = Constants.innerCornerRadius
+        hostedContentView.layer?.cornerCurve = .continuous
+        hostedContentView.layer?.masksToBounds = true
+        contentContainer.addSubview(hostedContentView)
+        glassView.contentView = contentContainer
+        glassView.autoresizingMask = [.width, .height]
+        self.contentView = glassView
         delegate = self
 
         configureWindow()
@@ -75,13 +108,18 @@ final class ChatBarPanel: NSPanel, NSWindowDelegate {
 
         webViewModel.onConversationStarted = { [weak self] in
             guard let self, self.isVisible else { return }
-            self.expandToNormalSize()
+            if self.presentationState == .visible {
+                self.expandToNormalSize()
+            } else {
+                self.pendingConversationExpansion = true
+            }
         }
     }
 
     deinit {
         positionSaveWork?.cancel()
         sizeSaveWork?.cancel()
+        // Backstop only; the monitor is normally removed on dismissal.
         if let clickOutsideMonitor {
             NSEvent.removeMonitor(clickOutsideMonitor)
         }
@@ -93,36 +131,207 @@ final class ChatBarPanel: NSPanel, NSWindowDelegate {
         isMovable = true
         isMovableByWindowBackground = false
         collectionBehavior.formUnion([.fullScreenAuxiliary, .canJoinAllSpaces])
-        minSize = NSSize(width: Constants.minWidth, height: Constants.minHeight)
-        maxSize = NSSize(width: Constants.maxWidth, height: Constants.maxHeight)
+        minSize = Self.panelSize(
+            forContentSize: NSSize(
+                width: Constants.minWidth,
+                height: Constants.minHeight
+            )
+        )
+        maxSize = Self.panelSize(
+            forContentSize: NSSize(
+                width: Constants.maxWidth,
+                height: Constants.maxHeight
+            )
+        )
 
+    }
+
+    /// Installed only while the panel is on screen. A monitor left armed keeps
+    /// waking the app for every click anywhere in the system, and the panel is
+    /// cached for the app's lifetime, so `deinit` is not a timely teardown.
+    private func installClickOutsideMonitor() {
+        guard clickOutsideMonitor == nil else { return }
         clickOutsideMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: .leftMouseDown
         ) { [weak self] _ in
             guard let self, self.isVisible else { return }
-            self.orderOut(nil)
+            self.onRequestDismiss()
         }
+    }
+
+    private func removeClickOutsideMonitor() {
+        guard let clickOutsideMonitor else { return }
+        NSEvent.removeMonitor(clickOutsideMonitor)
+        self.clickOutsideMonitor = nil
     }
 
     private func configureAppearance() {
         hasShadow = true
         backgroundColor = .clear
         isOpaque = false
-
-        contentView?.wantsLayer = true
-        contentView?.layer?.cornerRadius = Constants.cornerRadius
-        contentView?.layer?.masksToBounds = true
-        contentView?.layer?.borderWidth = Constants.borderWidth
-        contentView?.layer?.borderColor = NSColor.separatorColor.cgColor
+        animationBehavior = .none
     }
 
-    /// Runs after the panel becomes key. Deferring focus by one run-loop turn
-    /// gives BrowserWebView time to attach the shared WKWebView on first show.
+    /// Resolves the correct size before the panel's final presentation frame is
+    /// calculated. A hidden panel does not need to animate this adjustment.
     func prepareForPresentation() {
-        adjustSizeForConversationState()
+        guard !isProgrammaticTransition else { return }
+        adjustSizeForConversationState(animated: false)
+        presentationFrame = frame
+    }
+
+    /// Deferring focus by one run-loop turn gives BrowserWebView time to attach
+    /// the shared WKWebView after the destination window becomes key.
+    func focusComposer() {
         DispatchQueue.main.async { [weak self] in
             self?.webViewModel?.focusComposer()
         }
+    }
+
+    /// Positions the inner app at the requested origin. The glass rim extends
+    /// outward from that content box and does not change its saved placement.
+    func setPresentationContentOrigin(_ origin: NSPoint) {
+        positionSaveWork?.cancel()
+        isProgrammaticTransition = true
+        setFrameOrigin(Self.panelOrigin(forContentOrigin: origin))
+        presentationFrame = frame
+        isProgrammaticTransition = false
+    }
+
+    /// The web app's dimensions, excluding the Liquid Glass chrome.
+    var contentBoxSize: NSSize {
+        Self.contentSize(forPanelSize: frame.size)
+    }
+
+    var shouldDismissOnToggle: Bool {
+        presentationState == .showing || presentationState == .visible
+    }
+
+    func presentAnimated() {
+        presentationGeneration += 1
+        let generation = presentationGeneration
+
+        if presentationState == .visible, isVisible {
+            makeKeyAndOrderFront(nil)
+            return
+        }
+
+        let wasVisible = isVisible
+        presentationState = .showing
+        isProgrammaticTransition = true
+        positionSaveWork?.cancel()
+        installClickOutsideMonitor()
+
+        let finalFrame = presentationFrame ?? frame
+        presentationFrame = finalFrame
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let offset = reduceMotion ? 0 : Constants.verticalMotionOffset
+        let effectiveDuration = reduceMotion
+            ? Constants.reducedMotionDuration
+            : Constants.showDuration
+        let initialFrame = finalFrame.offsetBy(dx: 0, dy: -offset)
+
+        if !wasVisible {
+            setFrame(initialFrame, display: false)
+            alphaValue = 0
+        }
+        makeKeyAndOrderFront(nil)
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = effectiveDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            // NSWindow provides an implicit animation for `frame`, but not
+            // for `frameOrigin`. Keeping the size unchanged still makes this
+            // a position-only compositor move.
+            animator().setFrame(finalFrame, display: true)
+            animator().alphaValue = 1
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self,
+                      generation == self.presentationGeneration else { return }
+
+                self.setFrame(finalFrame, display: false)
+                self.alphaValue = 1
+                self.presentationFrame = finalFrame
+                self.isProgrammaticTransition = false
+                self.presentationState = .visible
+
+                if self.pendingConversationExpansion {
+                    self.pendingConversationExpansion = false
+                    self.expandToNormalSize()
+                }
+            }
+        }
+    }
+
+    func dismissAnimated() {
+        presentationGeneration += 1
+        let generation = presentationGeneration
+        // Dropped up front so a click landing during the hide animation cannot
+        // request a second dismissal.
+        removeClickOutsideMonitor()
+
+        guard isVisible else {
+            presentationState = .hidden
+            alphaValue = 1
+            return
+        }
+
+        presentationState = .hiding
+        isProgrammaticTransition = true
+        positionSaveWork?.cancel()
+
+        let finalFrame = presentationFrame ?? frame
+        presentationFrame = finalFrame
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let offset = reduceMotion ? 0 : Constants.verticalMotionOffset
+        let effectiveDuration = reduceMotion
+            ? Constants.reducedMotionDuration
+            : Constants.hideDuration
+        let dismissedFrame = finalFrame.offsetBy(dx: 0, dy: -offset)
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = effectiveDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            animator().setFrame(dismissedFrame, display: true)
+            animator().alphaValue = 0
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self,
+                      generation == self.presentationGeneration else { return }
+
+                self.orderOut(nil)
+                self.setFrame(finalFrame, display: false)
+                self.alphaValue = 1
+                self.presentationFrame = finalFrame
+                self.isProgrammaticTransition = false
+                self.presentationState = .hidden
+            }
+        }
+    }
+
+    /// Window-to-window switching is intentionally immediate. It avoids
+    /// coupling the Chat Bar's swipe animation to main-window presentation or
+    /// moving the shared WKWebView while either window is mid-transition.
+    func dismissImmediately() {
+        presentationGeneration += 1
+        positionSaveWork?.cancel()
+        removeClickOutsideMonitor()
+        let finalFrame = presentationFrame ?? frame
+
+        // A zero-duration animator assignment cancels any in-flight implicit
+        // frame/alpha animation before the panel is ordered out.
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            animator().setFrame(finalFrame, display: false)
+            animator().alphaValue = 1
+        }
+        orderOut(nil)
+        setFrame(finalFrame, display: false)
+        alphaValue = 1
+        presentationFrame = finalFrame
+        isProgrammaticTransition = false
+        presentationState = .hidden
     }
 
     /// A provider switch always opens the new provider's home page.
@@ -135,18 +344,18 @@ final class ChatBarPanel: NSPanel, NSWindowDelegate {
         }
     }
 
-    private func adjustSizeForConversationState() {
+    private func adjustSizeForConversationState(animated: Bool = true) {
         let inConversation = webViewModel?.isInConversation ?? false
         if inConversation {
             if !isExpanded {
-                expandToNormalSize()
+                expandToNormalSize(animated: animated)
             }
         } else if isExpanded {
             resetToInitialSize()
         }
     }
 
-    private func expandToNormalSize() {
+    private func expandToNormalSize(animated: Bool = true) {
         guard !isExpanded, let screen = currentScreen else { return }
         isExpanded = true
 
@@ -156,44 +365,71 @@ final class ChatBarPanel: NSPanel, NSWindowDelegate {
             expandedHeight,
             maxAvailableHeight - Constants.topPadding
         )
-        let clampedHeight = max(targetHeight, initialSize.height)
+        let clampedHeight = max(targetHeight, initialPanelSize.height)
+        let targetFrame = NSRect(
+            x: currentFrame.origin.x,
+            y: currentFrame.origin.y,
+            width: currentFrame.width,
+            height: clampedHeight
+        )
+        presentationFrame = targetFrame
+
+        guard animated,
+              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            setFrame(targetFrame, display: true)
+            return
+        }
+
+        // Window frame animations post `windowDidResize` on every step, and that
+        // handler records `presentationFrame` unless a programmatic transition
+        // is in progress. Without this flag an expand interrupted by a dismiss
+        // would persist a half-expanded height and reuse it on the next show.
+        presentationGeneration += 1
+        let generation = presentationGeneration
+        isProgrammaticTransition = true
 
         NSAnimationContext.runAnimationGroup { context in
             context.duration = Constants.animationDuration
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            self.animator().setFrame(
-                NSRect(
-                    x: currentFrame.origin.x,
-                    y: currentFrame.origin.y,
-                    width: currentFrame.width,
-                    height: clampedHeight
-                ),
-                display: true
-            )
+            self.animator().setFrame(targetFrame, display: true)
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self,
+                      generation == self.presentationGeneration else { return }
+
+                self.presentationFrame = targetFrame
+                self.isProgrammaticTransition = false
+            }
         }
     }
 
     func resetToInitialSize() {
         isExpanded = false
+        // Invalidates any in-flight expand so its completion cannot restore the
+        // expanded height after this collapse.
+        presentationGeneration += 1
+        isProgrammaticTransition = false
         let currentFrame = frame
-        setFrame(
-            NSRect(
-                x: currentFrame.origin.x,
-                y: currentFrame.origin.y,
-                width: currentFrame.width,
-                height: initialSize.height
-            ),
-            display: true
+        let targetFrame = NSRect(
+            x: currentFrame.origin.x,
+            y: currentFrame.origin.y,
+            width: currentFrame.width,
+            height: initialPanelSize.height
         )
+        presentationFrame = targetFrame
+        setFrame(targetFrame, display: true)
     }
 
     // MARK: - NSWindowDelegate
 
     func windowDidResize(_ notification: Notification) {
+        if !isProgrammaticTransition {
+            presentationFrame = frame
+        }
         guard !isExpanded else { return }
 
         sizeSaveWork?.cancel()
-        let size = frame.size
+        let size = contentBoxSize
         let work = DispatchWorkItem {
             UserDefaults.standard.set(
                 size.width,
@@ -212,10 +448,12 @@ final class ChatBarPanel: NSPanel, NSWindowDelegate {
     }
 
     func windowDidMove(_ notification: Notification) {
+        guard !isProgrammaticTransition else { return }
+        presentationFrame = frame
         guard PanelPosition.current == .rememberLast else { return }
 
         positionSaveWork?.cancel()
-        let origin = frame.origin
+        let origin = Self.contentOrigin(forPanelOrigin: frame.origin)
         let work = DispatchWorkItem {
             UserDefaults.standard.set(
                 origin.x,
@@ -236,7 +474,7 @@ final class ChatBarPanel: NSPanel, NSWindowDelegate {
     // MARK: - Keyboard Handling
 
     override func cancelOperation(_ sender: Any?) {
-        orderOut(nil)
+        onRequestDismiss()
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -270,6 +508,34 @@ final class ChatBarPanel: NSPanel, NSWindowDelegate {
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+
+    nonisolated static func panelSize(forContentSize size: NSSize) -> NSSize {
+        NSSize(
+            width: size.width + Constants.chromeExpansion,
+            height: size.height + Constants.chromeExpansion
+        )
+    }
+
+    nonisolated static func contentSize(forPanelSize size: NSSize) -> NSSize {
+        NSSize(
+            width: size.width - Constants.chromeExpansion,
+            height: size.height - Constants.chromeExpansion
+        )
+    }
+
+    nonisolated static func panelOrigin(forContentOrigin origin: NSPoint) -> NSPoint {
+        NSPoint(
+            x: origin.x - Constants.glassRimWidth,
+            y: origin.y - Constants.glassRimWidth
+        )
+    }
+
+    nonisolated static func contentOrigin(forPanelOrigin origin: NSPoint) -> NSPoint {
+        NSPoint(
+            x: origin.x + Constants.glassRimWidth,
+            y: origin.y + Constants.glassRimWidth
+        )
+    }
 }
 
 extension ChatBarPanel {
@@ -280,12 +546,44 @@ extension ChatBarPanel {
         static let minHeight: CGFloat = 150
         static let maxWidth: CGFloat = 900
         static let maxHeight: CGFloat = 900
+        static let glassRimWidth: CGFloat = 15
+        static let chromeExpansion: CGFloat = glassRimWidth * 2
         static let cornerRadius: CGFloat = 30
-        static let borderWidth: CGFloat = 0.5
+        static let innerCornerRadius: CGFloat = cornerRadius - glassRimWidth
         static let expandedScreenRatio: CGFloat = 0.7
         static let animationDuration: TimeInterval = 0.3
+        static let showDuration: TimeInterval = 0.16
+        static let hideDuration: TimeInterval = 0.12
+        static let reducedMotionDuration: TimeInterval = 0.08
+        static let verticalMotionOffset: CGFloat = 20
         static let topPadding: CGFloat = 20
         static let positionSaveDebounce: TimeInterval = 0.3
         static let sizeSaveDebounce: TimeInterval = 0.3
+    }
+}
+
+/// A single system-rendered glass surface forms chrome outside the web app's
+/// persisted content box, so adding the rim never shrinks the website.
+private final class ChatBarGlassEffectView: NSGlassEffectView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        configureGlass()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configureGlass()
+    }
+
+    private func configureGlass() {
+        style = .regular
+        cornerRadius = ChatBarPanel.Constants.cornerRadius
+        // NSGlassEffectView rounds its material, but the hosted hierarchy also
+        // needs an outer clip to prevent a square window edge from leaking
+        // through at the transparent corners.
+        wantsLayer = true
+        layer?.cornerRadius = ChatBarPanel.Constants.cornerRadius
+        layer?.cornerCurve = .continuous
+        layer?.masksToBounds = true
     }
 }

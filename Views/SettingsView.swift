@@ -19,10 +19,6 @@ struct SettingsView: View {
     private var hideDockIcon = false
     @AppStorage(UserDefaultsKeys.appTheme.rawValue)
     private var appTheme = AppTheme.system.rawValue
-    @AppStorage(UserDefaultsKeys.userAgentOption.rawValue)
-    private var userAgentOption = UserAgentOption.safari.rawValue
-    @AppStorage(UserDefaultsKeys.customUserAgent.rawValue)
-    private var customUserAgent = ""
     @AppStorage(UserDefaultsKeys.panelPosition.rawValue)
     private var panelPosition = PanelPosition.bottomCenter.rawValue
 
@@ -142,40 +138,6 @@ struct SettingsView: View {
                 }
             }
 
-            Section("User Agent") {
-                HStack {
-                    Text("Browser Identity:")
-                    Spacer()
-                    Picker("Browser Identity", selection: $userAgentOption) {
-                        ForEach(UserAgentOption.allCases, id: \.rawValue) { option in
-                            Text(option.displayName).tag(option.rawValue)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .frame(width: 240)
-                    .onChange(of: userAgentOption) { _, _ in
-                        coordinator.webViewModel.applyUserAgent()
-                    }
-                }
-
-                if userAgentOption == UserAgentOption.custom.rawValue {
-                    TextField(
-                        "Custom User Agent",
-                        text: $customUserAgent,
-                        prompt: Text("Enter custom user agent string")
-                    )
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit {
-                        coordinator.webViewModel.applyUserAgent()
-                    }
-                }
-
-                Text(currentUserAgentDescription)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
             Section("Privacy") {
                 HStack {
                     VStack(alignment: .leading) {
@@ -211,11 +173,6 @@ struct SettingsView: View {
             get: { coordinator.activeProvider },
             set: { coordinator.switchProvider(to: $0) }
         )
-    }
-
-    private var currentUserAgentDescription: String {
-        let option = UserAgentOption(rawValue: userAgentOption) ?? .safari
-        return option.settingsDescription(custom: customUserAgent)
     }
 
     private func clearWebsiteData() {

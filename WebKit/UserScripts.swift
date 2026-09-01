@@ -114,11 +114,41 @@ enum UserScripts {
 
             let lastState = null;
             let scheduled = false;
+            let observer = null;
+            let observing = false;
+
+            // Subtree childList observation makes WebKit build a MutationRecord
+            // for every node the page inserts, which is heaviest while a
+            // response streams. It is only needed to catch the transition into
+            // a conversation, so it is dropped once that has been detected and
+            // restored if a route change puts the page back outside one.
+            function connect() {
+                if (observing || !document.body) return;
+                if (!observer) observer = new MutationObserver(schedule);
+                observer.observe(document.body, {
+                    childList: true,
+                    subtree: true,
+                    attributes: true,
+                    attributeFilter: ['data-is-streaming']
+                });
+                observing = true;
+            }
+
+            function disconnect() {
+                if (!observing) return;
+                observer.disconnect();
+                observing = false;
+            }
 
             function publish() {
                 const state = !!isInProviderConversation();
                 if (state === lastState) return;
                 lastState = state;
+                if (state) {
+                    disconnect();
+                } else {
+                    connect();
+                }
                 try {
                     window.webkit.messageHandlers.\(conversationStateHandler).postMessage({
                         inConversation: state
@@ -140,12 +170,7 @@ enum UserScripts {
                     setTimeout(start, 25);
                     return;
                 }
-                new MutationObserver(schedule).observe(document.body, {
-                    childList: true,
-                    subtree: true,
-                    attributes: true,
-                    attributeFilter: ['data-is-streaming']
-                });
+                connect();
                 publish();
             }
 

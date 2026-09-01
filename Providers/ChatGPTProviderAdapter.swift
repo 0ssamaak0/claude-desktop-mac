@@ -256,9 +256,4 @@ struct ChatGPTProviderAdapter: ProviderAdapter {
         ) !== null;
     }
     """
-
-    private func normalizedPath(_ path: String) -> String {
-        guard path.count > 1, path.hasSuffix("/") else { return path }
-        return String(path.dropLast())
-    }
 }

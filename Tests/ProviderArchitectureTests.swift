@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import AppKit
 import KeyboardShortcuts
 import XCTest
 @testable import AI_Chat
@@ -93,6 +94,43 @@ final class LLMProviderTests: XCTestCase {
     }
 }
 
+final class ChatBarPresentationTests: XCTestCase {
+    func testGlassChromeAndSwipeAnimationsStayRestrained() {
+        XCTAssertEqual(ChatBarPanel.Constants.glassRimWidth, 15)
+        XCTAssertEqual(ChatBarPanel.Constants.chromeExpansion, 30)
+        XCTAssertEqual(ChatBarPanel.Constants.innerCornerRadius, 15)
+        XCTAssertLessThanOrEqual(ChatBarPanel.Constants.showDuration, 0.16)
+        XCTAssertLessThanOrEqual(ChatBarPanel.Constants.hideDuration, 0.12)
+        XCTAssertLessThanOrEqual(ChatBarPanel.Constants.verticalMotionOffset, 20)
+    }
+
+    func testWindowFrameIsAnimatableButFrameOriginIsNot() {
+        XCTAssertNotNil(NSWindow.defaultAnimation(forKey: "frame"))
+        XCTAssertNil(NSWindow.defaultAnimation(forKey: "frameOrigin"))
+    }
+
+    func testGlassChromeGrowsOutsideThePersistedContentBox() {
+        let contentSize = NSSize(width: 500, height: 459)
+        let panelSize = ChatBarPanel.panelSize(forContentSize: contentSize)
+
+        XCTAssertEqual(panelSize, NSSize(width: 530, height: 489))
+        XCTAssertEqual(
+            ChatBarPanel.contentSize(forPanelSize: panelSize),
+            contentSize
+        )
+
+        let contentOrigin = NSPoint(x: 300, y: 50)
+        let panelOrigin = ChatBarPanel.panelOrigin(
+            forContentOrigin: contentOrigin
+        )
+        XCTAssertEqual(panelOrigin, NSPoint(x: 285, y: 35))
+        XCTAssertEqual(
+            ChatBarPanel.contentOrigin(forPanelOrigin: panelOrigin),
+            contentOrigin
+        )
+    }
+}
+
 final class HostPolicyTests: XCTestCase {
     func testExactHostsAllowOnlyTheExactNormalizedHost() {
         let policy = HostPolicy(exactHosts: ["Gemini.Google.Com."])
@@ -170,6 +208,29 @@ final class ProviderRoutingTests: XCTestCase {
         XCTAssertEqual(gemini.classify(try url("https://accounts.google.com/signin")), .authentication)
         XCTAssertEqual(gemini.classify(try url("https://lh3.googleusercontent.com/image")), .media)
         XCTAssertEqual(gemini.classify(try url("https://evilgoogle.com/app")), .external)
+    }
+
+    /// Google sign-in redirects through these before returning to Gemini.
+    /// Classifying any of them `.external` hands the flow to the default
+    /// browser mid-login and the user never gets back to a signed-in app.
+    func testGeminiKeepsGoogleSignInRedirectsInApp() throws {
+        XCTAssertEqual(
+            gemini.classify(try url("https://consent.google.com/ui")),
+            .authentication
+        )
+        XCTAssertEqual(
+            gemini.classify(try url("https://myaccount.google.com/signinoptions")),
+            .authentication
+        )
+        XCTAssertEqual(
+            gemini.classify(try url("https://accounts.youtube.com/accounts/CheckConnection")),
+            .authentication
+        )
+        // The lookalike guard must still hold for the widened policy.
+        XCTAssertEqual(
+            gemini.classify(try url("https://consent.google.com.evil.com/ui")),
+            .external
+        )
     }
 
     func testChatGPTClassifiesApplicationAuthenticationMediaAndExternalURLs() throws {

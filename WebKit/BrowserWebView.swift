@@ -19,11 +19,6 @@ struct BrowserWebView: NSViewRepresentable {
         webView = webViewModel.wkWebView
     }
 
-    init(model: WebViewModel) {
-        webViewModel = model
-        webView = model.wkWebView
-    }
-
     func makeCoordinator() -> Coordinator {
         Coordinator(webViewModel: webViewModel)
     }
@@ -272,6 +267,7 @@ final class BrowserWebViewContainer: NSView {
         self.coordinator = coordinator
         super.init(frame: .zero)
         autoresizesSubviews = true
+        BrowserWebViewHosts.register(self, for: webViewModel)
     }
 
     required init?(coder: NSCoder) {
@@ -282,15 +278,12 @@ final class BrowserWebViewContainer: NSView {
         if let windowObserver {
             NotificationCenter.default.removeObserver(windowObserver)
         }
-        if let webViewModel {
-            BrowserWebViewOwnership.release(self, for: webViewModel)
-        }
     }
 
     func swapWebView(to newWebView: WKWebView) {
         guard webView !== newWebView else { return }
         let retainedOwnership = webViewModel.map {
-            BrowserWebViewOwnership.isOwner(self, for: $0)
+            BrowserWebViewHosts.isOwner(self, for: $0)
         } ?? false
         if webView.superview === self {
             webView.removeFromSuperview()
@@ -331,7 +324,7 @@ final class BrowserWebViewContainer: NSView {
 
     private func attachWebView() {
         guard let webViewModel else { return }
-        BrowserWebViewOwnership.claim(self, for: webViewModel)
+        BrowserWebViewHosts.claim(self, for: webViewModel)
         guard webView.superview !== self else { return }
         webView.removeFromSuperview()
         webView.frame = bounds
@@ -343,16 +336,37 @@ final class BrowserWebViewContainer: NSView {
 }
 
 /// Main window and Chat Bar both retain a representable. This registry records
-/// which container last displayed a model without retaining either object.
-private enum BrowserWebViewOwnership {
+/// which container last displayed a model without retaining either object, and
+/// lets the model push a replacement WebView to every live host.
+///
+/// The broadcast matters for memory: both containers outlive every provider
+/// switch, and whichever one is off-screen would otherwise keep the previous
+/// `WKWebView` — and its WebContent process — alive until SwiftUI happened to
+/// re-run `updateNSView` on a hidden window.
+///
+/// Entries are weak and are filtered on access, so a deallocated container
+/// needs no explicit removal and `deinit` never has to reach main-actor state.
+@MainActor
+enum BrowserWebViewHosts {
     private final class WeakContainer {
         weak var value: BrowserWebViewContainer?
         init(_ value: BrowserWebViewContainer) { self.value = value }
     }
 
+    private static var hosts: [ObjectIdentifier: [WeakContainer]] = [:]
     private static var owners: [ObjectIdentifier: WeakContainer] = [:]
 
+    static func register(_ container: BrowserWebViewContainer, for model: WebViewModel) {
+        let key = ObjectIdentifier(model)
+        var entries = hosts[key, default: []].filter {
+            $0.value != nil && $0.value !== container
+        }
+        entries.append(WeakContainer(container))
+        hosts[key] = entries
+    }
+
     static func claim(_ container: BrowserWebViewContainer, for model: WebViewModel) {
+        register(container, for: model)
         owners[ObjectIdentifier(model)] = WeakContainer(container)
     }
 
@@ -360,10 +374,12 @@ private enum BrowserWebViewOwnership {
         owners[ObjectIdentifier(model)]?.value === container
     }
 
-    static func release(_ container: BrowserWebViewContainer, for model: WebViewModel) {
+    static func webViewDidChange(to webView: WKWebView, for model: WebViewModel) {
         let key = ObjectIdentifier(model)
-        if owners[key]?.value === container {
-            owners.removeValue(forKey: key)
+        let entries = hosts[key, default: []].filter { $0.value != nil }
+        hosts[key] = entries.isEmpty ? nil : entries
+        for entry in entries {
+            entry.value?.swapWebView(to: webView)
         }
     }
 }

@@ -17,6 +17,12 @@ extension Notification.Name {
 final class AppCoordinator {
     private var chatBar: ChatBarPanel?
     private var mainToolbarDelegate: MainToolbarDelegate?
+    /// Written once in `init` and read only by `deinit`, which is nonisolated.
+    @ObservationIgnored
+    nonisolated(unsafe) private var openMainWindowObserver: NSObjectProtocol?
+    /// Runs against the main window the moment its root view attaches, so a
+    /// newly created window can be placed without polling for its arrival.
+    private var pendingWindowAttachAction: ((NSWindow) -> Void)?
 
     let webViewModel = WebViewModel()
     var openWindowAction: ((String) -> Void)?
@@ -30,7 +36,7 @@ final class AppCoordinator {
     var canGoForward: Bool { webViewModel.canGoForward }
 
     init() {
-        NotificationCenter.default.addObserver(
+        openMainWindowObserver = NotificationCenter.default.addObserver(
             forName: .openMainWindow,
             object: nil,
             queue: .main
@@ -38,6 +44,12 @@ final class AppCoordinator {
             Task { @MainActor [weak self] in
                 self?.openMainWindow()
             }
+        }
+    }
+
+    deinit {
+        if let openMainWindowObserver {
+            NotificationCenter.default.removeObserver(openMainWindowObserver)
         }
     }
 
@@ -91,6 +103,11 @@ final class AppCoordinator {
     /// Attaches the capability-driven toolbar for the active provider. Each
     /// provider gets its own autosaved customization layout.
     func attachMainToolbar(to window: NSWindow) {
+        if let pendingWindowAttachAction {
+            self.pendingWindowAttachAction = nil
+            pendingWindowAttachAction(window)
+        }
+
         let expectedIdentifier = MainToolbarDelegate.toolbarIdentifier(
             for: activeProvider
         )
@@ -98,7 +115,6 @@ final class AppCoordinator {
 
         let delegate = MainToolbarDelegate(
             coordinator: self,
-            window: window,
             provider: activeProvider,
             capabilities: capabilities
         )
@@ -152,15 +168,13 @@ final class AppCoordinator {
         webViewModel.resumeIfSuspended()
         closeMainWindow()
 
-        let position = PanelPosition.current
-        if let bar = chatBar {
-            if position != .rememberLast {
-                positionChatBar(bar, position: position)
-            }
-            bar.makeKeyAndOrderFront(nil)
-            bar.prepareForPresentation()
-            return
-        }
+        let bar = prepareChatBar()
+        bar.presentAnimated()
+        bar.focusComposer()
+    }
+
+    private func ensureChatBar() -> ChatBarPanel {
+        if let chatBar { return chatBar }
 
         let contentView = ChatBarView(
             webViewModel: webViewModel,
@@ -171,13 +185,25 @@ final class AppCoordinator {
         let hostingView = NSHostingView(rootView: contentView)
         let bar = ChatBarPanel(
             contentView: hostingView,
-            webViewModel: webViewModel
+            webViewModel: webViewModel,
+            onRequestDismiss: { [weak self] in
+                self?.hideChatBar()
+            }
         )
-
-        positionChatBar(bar, position: position)
         chatBar = bar
-        bar.makeKeyAndOrderFront(nil)
+        return bar
+    }
+
+    private func prepareChatBar() -> ChatBarPanel {
+        let wasCreated = chatBar == nil
+        let bar = ensureChatBar()
         bar.prepareForPresentation()
+
+        let position = PanelPosition.current
+        if wasCreated || (!bar.isVisible && position != .rememberLast) {
+            positionChatBar(bar, position: position)
+        }
+        return bar
     }
 
     private func positionChatBar(_ bar: ChatBarPanel, position: PanelPosition) {
@@ -194,22 +220,22 @@ final class AppCoordinator {
                     y: defaults.double(forKey: UserDefaultsKeys.panelY.rawValue)
                 )
                 let center = NSPoint(
-                    x: saved.x + bar.frame.width / 2,
-                    y: saved.y + bar.frame.height / 2
+                    x: saved.x + bar.contentBoxSize.width / 2,
+                    y: saved.y + bar.contentBoxSize.height / 2
                 )
                 if NSScreen.screenStrictly(containing: center) != nil {
-                    bar.setFrameOrigin(saved)
+                    bar.setPresentationContentOrigin(saved)
                     return
                 }
             }
         }
 
         let origin = screen.point(
-            for: bar.frame.size,
+            for: bar.contentBoxSize,
             position: position,
             dockOffset: Constants.dockOffset
         )
-        bar.setFrameOrigin(origin)
+        bar.setPresentationContentOrigin(origin)
     }
 
     func resetChatBarPosition() {
@@ -218,7 +244,7 @@ final class AppCoordinator {
     }
 
     func hideChatBar() {
-        chatBar?.orderOut(nil)
+        chatBar?.dismissAnimated()
     }
 
     func closeMainWindow() {
@@ -226,7 +252,7 @@ final class AppCoordinator {
     }
 
     func toggleChatBar() {
-        if let chatBar, chatBar.isVisible {
+        if let chatBar, chatBar.shouldDismissOnToggle {
             hideChatBar()
         } else {
             showChatBar()
@@ -239,13 +265,12 @@ final class AppCoordinator {
             return NSScreen.screen(containing: center)
         } ?? NSScreen.main
 
-        hideChatBar()
         openMainWindow(on: targetScreen)
     }
 
     func openMainWindow(on targetScreen: NSScreen? = nil) {
         webViewModel.resumeIfSuspended()
-        hideChatBar()
+        chatBar?.dismissImmediately()
 
         let hideDockIcon = UserDefaults.standard.bool(
             forKey: UserDefaultsKeys.hideDockIcon.rawValue
@@ -260,10 +285,14 @@ final class AppCoordinator {
             }
             window.makeKeyAndOrderFront(nil)
         } else if let openWindowAction {
-            openWindowAction(Constants.mainWindowIdentifier)
             if let targetScreen {
-                centerNewlyCreatedWindow(on: targetScreen)
+                pendingWindowAttachAction = { [weak self] window in
+                    guard let self else { return }
+                    self.centerWindow(window, on: targetScreen)
+                    self.applyAlwaysOnTop()
+                }
             }
+            openWindowAction(Constants.mainWindowIdentifier)
         }
 
         applyAlwaysOnTop()
@@ -281,20 +310,6 @@ final class AppCoordinator {
         window.setFrameOrigin(screen.centerPoint(for: window.frame.size))
     }
 
-    private func centerNewlyCreatedWindow(on screen: NSScreen, attempt: Int = 1) {
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + Constants.windowCreationRetryDelay
-        ) { [weak self] in
-            guard let self else { return }
-
-            if let window = self.findMainWindow() {
-                self.centerWindow(window, on: screen)
-                self.applyAlwaysOnTop()
-            } else if attempt < Constants.windowCreationMaxAttempts {
-                self.centerNewlyCreatedWindow(on: screen, attempt: attempt + 1)
-            }
-        }
-    }
 }
 
 extension AppCoordinator {
@@ -302,8 +317,6 @@ extension AppCoordinator {
         static let dockOffset: CGFloat = 50
         static let mainWindowIdentifier = "main"
         static let mainWindowTitle = "AI Chat"
-        static let windowCreationRetryDelay: TimeInterval = 0.05
-        static let windowCreationMaxAttempts = 5
     }
 }
 
@@ -331,7 +344,6 @@ extension NSToolbarItem.Identifier {
 @MainActor
 final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSToolbarItemValidation {
     private weak var coordinator: AppCoordinator?
-    private weak var hostWindow: NSWindow?
     private let provider: LLMProvider
     private let capabilities: ProviderCapabilities
     private var lastPinnedState: Bool?
@@ -342,12 +354,10 @@ final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSToolbarItemValid
 
     init(
         coordinator: AppCoordinator,
-        window: NSWindow,
         provider: LLMProvider,
         capabilities: ProviderCapabilities
     ) {
         self.coordinator = coordinator
-        self.hostWindow = window
         self.provider = provider
         self.capabilities = capabilities
         super.init()
@@ -578,9 +588,6 @@ final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSToolbarItemValid
     }
 
     @objc private func chatBarAction() {
-        if let hostWindow, !(hostWindow is NSPanel) {
-            hostWindow.orderOut(nil)
-        }
         coordinator?.showChatBar()
     }
 

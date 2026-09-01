@@ -10,7 +10,18 @@ struct GeminiProviderAdapter: ProviderAdapter {
     let provider: LLMProvider = .gemini
     let homeURL = URL(string: "https://gemini.google.com/app")!
     let applicationHosts = HostPolicy(exactHosts: ["gemini.google.com"])
-    let authenticationHosts = HostPolicy(exactHosts: ["accounts.google.com"])
+    /// Google sign-in bounces through consent and account-management hosts
+    /// before returning to Gemini. Any of these reached as a top-level
+    /// navigation must stay in-app or the login flow breaks.
+    let authenticationHosts = HostPolicy(
+        exactHosts: [
+            "accounts.google.com",
+            "consent.google.com",
+            "myaccount.google.com",
+            "accounts.youtube.com"
+        ],
+        domainSuffixes: ["accounts.google.com"]
+    )
     let mediaHosts = HostPolicy(
         domainSuffixes: ["googleapis.com", "gstatic.com", "googleusercontent.com"]
     )
@@ -154,9 +165,4 @@ struct GeminiProviderAdapter: ProviderAdapter {
         ) !== null;
     }
     """
-
-    private func normalizedPath(_ path: String) -> String {
-        guard path.count > 1, path.hasSuffix("/") else { return path }
-        return String(path.dropLast())
-    }
 }

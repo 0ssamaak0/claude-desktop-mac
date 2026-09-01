@@ -81,6 +81,13 @@ extension ProviderAdapter {
         page(for: url) == .home
     }
 
+    /// Drops a single trailing slash so `/projects/` and `/projects` classify
+    /// alike. Shared because all three adapters match paths the same way.
+    func normalizedPath(_ path: String) -> String {
+        guard path.count > 1, path.hasSuffix("/") else { return path }
+        return String(path.dropLast())
+    }
+
     func allowsMediaCapture(from host: String) -> Bool {
         // CDN/media resource hosts may be loaded in-page, but only the provider's
         // own application origin receives automatic camera/microphone permission.
