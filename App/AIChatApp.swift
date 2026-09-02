@@ -23,7 +23,17 @@ extension KeyboardShortcuts.Name {
 @main
 struct AIChatApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var coordinator = AppCoordinator()
+
+    /// Deliberately not `@State`. The global hotkey handler reads the
+    /// coordinator from a Carbon callback, outside any view update, and reading
+    /// a `@State` value there re-evaluates its initializer: every keypress
+    /// produced a fresh coordinator, a fresh WKWebView, and another Chat Bar
+    /// panel left on screen.
+    private let coordinator = AppCoordinator.shared
+
+    /// `KeyboardShortcuts.onKeyDown` appends to a shared list rather than
+    /// replacing, so a second registration would fire the handler twice.
+    @MainActor private static var didRegisterHotKey = false
 
     var body: some Scene {
         Window(AppCoordinator.Constants.mainWindowTitle, id: Constants.mainWindowID) {
@@ -202,8 +212,11 @@ struct AIChatApp: App {
         // `NSApp` does not exist yet when SwiftUI initializes this value.
         SelectionCaptureService.shared.syncWithPreference()
 
-        KeyboardShortcuts.onKeyDown(for: .bringToFront) { [self] in
-            coordinator.toggleChatBar()
+        if !Self.didRegisterHotKey {
+            Self.didRegisterHotKey = true
+            KeyboardShortcuts.onKeyDown(for: .bringToFront) {
+                AppCoordinator.shared.toggleChatBar()
+            }
         }
     }
 

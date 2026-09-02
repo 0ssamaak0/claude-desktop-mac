@@ -15,6 +15,12 @@ extension Notification.Name {
 @MainActor
 @Observable
 final class AppCoordinator {
+    /// The one coordinator for the process. The global hotkey handler runs
+    /// outside SwiftUI's view graph and needs a stable reference; anything
+    /// resolved per-call there would build a second coordinator, and with it a
+    /// second WebView and Chat Bar panel.
+    static let shared = AppCoordinator()
+
     private var chatBar: ChatBarPanel?
     private var mainToolbarDelegate: MainToolbarDelegate?
     /// Written once in `init` and read only by `deinit`, which is nonisolated.
