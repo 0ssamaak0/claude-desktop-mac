@@ -37,14 +37,19 @@ enum AppTheme: String, CaseIterable {
         }
     }
 
+    /// `NSApp` is an implicitly unwrapped optional and stays nil until AppKit
+    /// creates the shared application. macOS 27 initializes the SwiftUI `App`
+    /// value before that happens, so applying a theme too early used to trap on
+    /// the unwrap and kill the process at launch.
     func apply() {
+        guard let app = NSApp else { return }
         switch self {
         case .system:
-            NSApp.appearance = nil
+            app.appearance = nil
         case .light:
-            NSApp.appearance = NSAppearance(named: .aqua)
+            app.appearance = NSAppearance(named: .aqua)
         case .dark:
-            NSApp.appearance = NSAppearance(named: .darkAqua)
+            app.appearance = NSAppearance(named: .darkAqua)
         }
     }
 

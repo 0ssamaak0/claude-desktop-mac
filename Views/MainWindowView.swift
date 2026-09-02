@@ -23,7 +23,13 @@ struct MainWindowView: View {
                     .background(.background)
             }
         }
-        .ignoresSafeArea()
+        // The stack itself respects the safe area, so the provider page starts
+        // below the toolbar instead of sliding under it. Only the backing fills
+        // the full window, giving the glass toolbar a surface to sit on.
+        .background {
+            Color(nsColor: .windowBackgroundColor)
+                .ignoresSafeArea()
+        }
         .background(WindowAccessor { window in
             coordinator.attachMainToolbar(to: window)
         })

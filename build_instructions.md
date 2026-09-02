@@ -1,6 +1,6 @@
 # Build Thinspace
 
-Thinspace targets macOS 26 and Apple silicon. The project intentionally does not
+Thinspace targets macOS 27 and Apple silicon. The project intentionally does not
 contain a development team or release provisioning profile.
 
 Build an unsigned local release from the repository root:

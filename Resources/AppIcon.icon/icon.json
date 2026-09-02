@@ -1,4 +1,7 @@
 {
+  "features" : [
+    "refractivity"
+  ],
   "fill-specializations" : [
     {
       "value" : {
@@ -25,7 +28,20 @@
           "fill-specializations" : [
             {
               "value" : {
-                "solid" : "extended-srgb:0.04706,0.05098,0.06667,1.00000"
+                "linear-gradient" : [
+                  "display-p3:0.23766,0.24062,0.25451,1.00000",
+                  "extended-srgb:0.04706,0.05098,0.06667,1.00000"
+                ],
+                "orientation" : {
+                  "start" : {
+                    "x" : 0.5,
+                    "y" : 0
+                  },
+                  "stop" : {
+                    "x" : 0.4999999999999991,
+                    "y" : 0.7041247007920237
+                  }
+                }
               }
             },
             {
@@ -63,6 +79,7 @@
       }
     },
     {
+      "blur-material" : 0.5,
       "layers" : [
         {
           "fill-specializations" : [
@@ -74,7 +91,7 @@
             {
               "appearance" : "dark",
               "value" : {
-                "solid" : "srgb:0.22745,0.23922,0.27843,0.00000"
+                "solid" : "extended-gray:0.75000,1.00000"
               }
             },
             {
@@ -98,6 +115,11 @@
       ],
       "lighting" : "combined",
       "name" : "Capsule",
+      "refractivity" : {
+        "depth" : 0.55,
+        "enabled" : true,
+        "strength" : 0.62
+      },
       "shadow" : {
         "kind" : "neutral",
         "opacity" : 0.55

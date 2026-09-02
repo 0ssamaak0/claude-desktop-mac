@@ -126,7 +126,14 @@ final class AppCoordinator {
         window.toolbar = toolbar
         window.toolbarStyle = .unified
 
-        // Float the toolbar pills over the web content.
+        // A transparent, full-size-content titlebar is what gives the toolbar
+        // its Liquid Glass treatment: the material needs the window surface
+        // behind it to cast a shadow and refract. An opaque titlebar flattens
+        // the pills into plain buttons.
+        //
+        // The web content is kept out from under it by the safe area in
+        // MainWindowView, not by shrinking the titlebar — provider pages put
+        // their own controls at the top and those collided with the toolbar.
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.titlebarSeparatorStyle = .none

@@ -100,7 +100,7 @@ neither controls nor weakens — the untrusted surface stays confined either way
 
 ## Requirements
 
-- macOS 26.0 or later
+- macOS 27.0 or later
 - Apple silicon Mac
 
 ## Install
@@ -137,7 +137,7 @@ xcodebuild test \
   CODE_SIGNING_ALLOWED=NO
 ```
 
-The project targets macOS 26 and arm64. Its only Swift package dependency is
+The project targets macOS 27 and arm64. Its only Swift package dependency is
 [KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts), pinned to
 version 3.0.1.
 

@@ -198,7 +198,8 @@ struct AIChatApp: App {
     }
 
     init() {
-        AppTheme.current.apply()
+        // The theme is applied in `configureLaunchVisibility`, not here:
+        // `NSApp` does not exist yet when SwiftUI initializes this value.
         SelectionCaptureService.shared.syncWithPreference()
 
         KeyboardShortcuts.onKeyDown(for: .bringToFront) { [self] in
@@ -207,6 +208,8 @@ struct AIChatApp: App {
     }
 
     private func configureLaunchVisibility() {
+        AppTheme.current.apply()
+
         let defaults = UserDefaults.standard
         let hideWindowAtLaunch = defaults.bool(
             forKey: UserDefaultsKeys.hideWindowAtLaunch.rawValue
