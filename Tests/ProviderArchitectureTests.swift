@@ -9,7 +9,7 @@ import JavaScriptCore
 import KeyboardShortcuts
 import WebKit
 import XCTest
-@testable import AI_Chat
+@testable import Thinspace
 
 private final class RecordingWebView: WKWebView {
     private(set) var evaluatedScripts: [String] = []

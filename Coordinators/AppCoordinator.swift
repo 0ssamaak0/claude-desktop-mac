@@ -1,6 +1,6 @@
 //
 //  AppCoordinator.swift
-//  AI Chat
+//  Thinspace
 //
 //  Created by alexcding on 2025-12-13.
 //
@@ -168,9 +168,20 @@ final class AppCoordinator {
         webViewModel.resumeIfSuspended()
         closeMainWindow()
 
+        // Read before the panel is presented, while the source app is still
+        // frontmost and its selection is what the system reports as focused.
+        let selection = SelectionCaptureService.shared.captureNow()
+
         let bar = prepareChatBar()
         bar.presentAnimated()
         bar.focusComposer()
+
+        guard let selection else { return }
+        // Queued behind the composer focus, which is itself deferred a turn, so
+        // focusing cannot move the caret back off the top of the quotation.
+        DispatchQueue.main.async { [weak self] in
+            self?.webViewModel.insertCapturedSelection(selection)
+        }
     }
 
     private func ensureChatBar() -> ChatBarPanel {
@@ -316,7 +327,7 @@ extension AppCoordinator {
     struct Constants {
         static let dockOffset: CGFloat = 50
         static let mainWindowIdentifier = "main"
-        static let mainWindowTitle = "AI Chat"
+        static let mainWindowTitle = "Thinspace"
     }
 }
 

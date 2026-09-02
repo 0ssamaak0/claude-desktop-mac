@@ -1,6 +1,6 @@
 //
 //  ChatGPTProviderAdapter.swift
-//  AI Chat
+//  Thinspace
 //
 
 import Foundation
@@ -171,7 +171,7 @@ struct ChatGPTProviderAdapter: ProviderAdapter {
                     if (window.__aiChatSetPrivateChatState) {
                         window.__aiChatSetPrivateChatState(true);
                     }
-                    console.log('[AI Chat] ChatGPT temporary chat activated');
+                    console.log('[Thinspace] ChatGPT temporary chat activated');
                     return;
                 }
 
@@ -187,7 +187,7 @@ struct ChatGPTProviderAdapter: ProviderAdapter {
                 if (window.__aiChatSetPrivateChatState) {
                     window.__aiChatSetPrivateChatState(true);
                 }
-                console.log('[AI Chat] ChatGPT temporary chat control clicked; state not exposed');
+                console.log('[Thinspace] ChatGPT temporary chat control clicked; state not exposed');
             }
 
             function attempt() {
@@ -197,7 +197,7 @@ struct ChatGPTProviderAdapter: ProviderAdapter {
                         if (window.__aiChatSetPrivateChatState) {
                             window.__aiChatSetPrivateChatState(true);
                         }
-                        console.log('[AI Chat] ChatGPT temporary chat already active');
+                        console.log('[Thinspace] ChatGPT temporary chat already active');
                         return;
                     }
                     match.control.click();
@@ -211,7 +211,7 @@ struct ChatGPTProviderAdapter: ProviderAdapter {
                 if (tries < MAX_TRIES) {
                     setTimeout(attempt, 100);
                 } else {
-                    console.log('[AI Chat] ChatGPT temporary chat control not found');
+                    console.log('[Thinspace] ChatGPT temporary chat control not found');
                 }
             }
 

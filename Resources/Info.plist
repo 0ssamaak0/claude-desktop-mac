@@ -3,10 +3,10 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>AI Chat</string>
+	<string>Thinspace</string>
 	<key>NSCameraUsageDescription</key>
-	<string>AI Chat uses camera access when a provider requests video or image capture.</string>
+	<string>Thinspace uses camera access when a provider requests video or image capture.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>AI Chat uses microphone access when a provider requests voice input.</string>
+	<string>Thinspace uses microphone access when a provider requests voice input.</string>
 </dict>
 </plist>

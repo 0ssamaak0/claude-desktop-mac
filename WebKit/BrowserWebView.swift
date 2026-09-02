@@ -1,6 +1,6 @@
 //
 //  BrowserWebView.swift
-//  AI Chat
+//  Thinspace
 //
 
 import AppKit

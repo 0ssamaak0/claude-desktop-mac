@@ -1,6 +1,6 @@
 //
 //  GeminiProviderAdapter.swift
-//  AI Chat
+//  Thinspace
 //
 
 import Foundation
@@ -86,7 +86,7 @@ struct GeminiProviderAdapter: ProviderAdapter {
                             if (sidebar) sidebar.click();
                         }, 125);
                     }
-                    console.log('[AI Chat] Gemini temporary chat activated');
+                    console.log('[Thinspace] Gemini temporary chat activated');
                     return;
                 }
                 if (!sidebarWasOpened) {
@@ -99,7 +99,7 @@ struct GeminiProviderAdapter: ProviderAdapter {
                 if (++tries < 50) {
                     setTimeout(attempt, 100);
                 } else {
-                    console.log('[AI Chat] Gemini temporary chat control not found');
+                    console.log('[Thinspace] Gemini temporary chat control not found');
                 }
             }
             if (document.activeElement instanceof HTMLElement) document.activeElement.blur();

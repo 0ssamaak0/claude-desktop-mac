@@ -1,6 +1,6 @@
 //
 //  MenuBarView.swift
-//  AI Chat
+//  Thinspace
 //
 //  Created by alexcding on 2025-12-13.
 //
@@ -17,7 +17,7 @@ struct MenuBarView: View {
             Button {
                 coordinator.openMainWindow()
             } label: {
-                Label("Open AI Chat", systemImage: "macwindow")
+                Label("Open Thinspace", systemImage: "macwindow")
             }
 
             Button {
@@ -38,7 +38,7 @@ struct MenuBarView: View {
             Button {
                 NSApp.terminate(nil)
             } label: {
-                Label("Quit AI Chat", systemImage: "power")
+                Label("Quit Thinspace", systemImage: "power")
             }
             .keyboardShortcut("q", modifiers: .command)
         }

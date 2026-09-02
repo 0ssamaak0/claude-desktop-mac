@@ -1,9 +1,10 @@
 //
 //  SettingsView.swift
-//  AI Chat
+//  Thinspace
 //
 
 import SwiftUI
+import Combine
 import KeyboardShortcuts
 import ServiceManagement
 import AppKit
@@ -21,10 +22,13 @@ struct SettingsView: View {
     private var appTheme = AppTheme.system.rawValue
     @AppStorage(UserDefaultsKeys.panelPosition.rawValue)
     private var panelPosition = PanelPosition.bottomCenter.rawValue
+    @AppStorage(UserDefaultsKeys.captureSelectedText.rawValue)
+    private var captureSelectedText = false
 
     @State private var showingResetAlert = false
     @State private var isClearing = false
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+    @State private var isAccessibilityTrusted = false
 
     var body: some View {
         Form {
@@ -48,7 +52,7 @@ struct SettingsView: View {
             }
 
             Section("General") {
-                Toggle("Launch AI Chat at Login", isOn: $launchAtLogin)
+                Toggle("Launch Thinspace at Login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, newValue in
                         do {
                             if newValue {
@@ -138,6 +142,39 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Text Capture") {
+                Toggle(
+                    "Capture Selected Text from Other Apps",
+                    isOn: $captureSelectedText
+                )
+                .onChange(of: captureSelectedText) { _, newValue in
+                    SelectionCaptureService.shared.syncWithPreference()
+                    // The only path in the app that can raise the system
+                    // Accessibility prompt. Leaving this off never shows it.
+                    guard newValue else { return }
+                    isAccessibilityTrusted =
+                        SelectionCaptureService.shared.requestPermission()
+                }
+
+                Text("When the Chat Bar opens, Thinspace reads whatever text you had selected in the app you were using and appends it, with the app and document name, to the message you send. Requires Accessibility permission.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if captureSelectedText, !isAccessibilityTrusted {
+                    HStack {
+                        Label(
+                            "Accessibility permission not granted",
+                            systemImage: "exclamationmark.triangle.fill"
+                        )
+                        .foregroundStyle(.orange)
+                        Spacer()
+                        Button("Open System Settings…") {
+                            SelectionCaptureService.shared.openAccessibilitySettings()
+                        }
+                    }
+                }
+            }
+
             Section("Privacy") {
                 HStack {
                     VStack(alignment: .leading) {
@@ -160,6 +197,16 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear(perform: refreshAccessibilityStatus)
+        // Permission is granted outside the app, so the status is re-read
+        // whenever the user comes back to it.
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: NSApplication.didBecomeActiveNotification
+            )
+        ) { _ in
+            refreshAccessibilityStatus()
+        }
         .alert("Reset Website Data?", isPresented: $showingResetAlert) {
             Button("Cancel", role: .cancel) {}
             Button("Reset", role: .destructive, action: clearWebsiteData)
@@ -173,6 +220,10 @@ struct SettingsView: View {
             get: { coordinator.activeProvider },
             set: { coordinator.switchProvider(to: $0) }
         )
+    }
+
+    private func refreshAccessibilityStatus() {
+        isAccessibilityTrusted = SelectionCaptureService.shared.isTrusted
     }
 
     private func clearWebsiteData() {

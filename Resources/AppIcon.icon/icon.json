@@ -1,15 +1,94 @@
 {
-  "fill" : {
-    "automatic-gradient" : "extended-gray:1.00000,1.00000"
-  },
+  "fill-specializations" : [
+    {
+      "value" : {
+        "linear-gradient" : [
+          "extended-srgb:0.98039,0.98431,0.99216,1.00000",
+          "extended-srgb:0.74510,0.77647,0.83922,1.00000"
+        ]
+      }
+    },
+    {
+      "appearance" : "dark",
+      "value" : {
+        "linear-gradient" : [
+          "extended-srgb:0.11765,0.12549,0.15294,1.00000",
+          "extended-srgb:0.02745,0.02745,0.03922,1.00000"
+        ]
+      }
+    }
+  ],
   "groups" : [
     {
       "layers" : [
         {
-          "image-name" : "AIChatBubble.png",
-          "name" : "AIChatBubble",
+          "fill-specializations" : [
+            {
+              "value" : {
+                "solid" : "extended-srgb:0.04706,0.05098,0.06667,1.00000"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "extended-srgb:1.00000,1.00000,1.00000,1.00000"
+              }
+            },
+            {
+              "appearance" : "tinted",
+              "value" : {
+                "solid" : "display-p3:0.00000,0.00000,0.00000,1.00000"
+              }
+            }
+          ],
+          "image-name" : "gap.png",
+          "name" : "Gap",
           "position" : {
-            "scale" : 0.7,
+            "scale" : 1.35,
+            "translation-in-points" : [
+              43.488577292171726,
+              0
+            ]
+          }
+        }
+      ],
+      "name" : "Slice",
+      "shadow" : {
+        "kind" : "none",
+        "opacity" : 0
+      },
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0.5
+      }
+    },
+    {
+      "layers" : [
+        {
+          "fill-specializations" : [
+            {
+              "value" : {
+                "solid" : "extended-srgb:1.00000,1.00000,1.00000,1.00000"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "srgb:0.22745,0.23922,0.27843,0.00000"
+              }
+            },
+            {
+              "appearance" : "tinted",
+              "value" : {
+                "solid" : "display-p3:0.98864,1.00000,1.00000,1.00000"
+              }
+            }
+          ],
+          "glass" : true,
+          "image-name" : "capsule.png",
+          "name" : "Slabs",
+          "position" : {
+            "scale" : 1,
             "translation-in-points" : [
               0,
               0
@@ -17,13 +96,16 @@
           }
         }
       ],
+      "lighting" : "combined",
+      "name" : "Capsule",
       "shadow" : {
         "kind" : "neutral",
-        "opacity" : 0.5
+        "opacity" : 0.55
       },
+      "specular" : true,
       "translucency" : {
         "enabled" : true,
-        "value" : 0.5
+        "value" : 0.72
       }
     }
   ],

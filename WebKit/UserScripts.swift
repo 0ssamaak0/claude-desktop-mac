@@ -1,6 +1,6 @@
 //
 //  UserScripts.swift
-//  AI Chat
+//  Thinspace
 //
 
 import WebKit
@@ -16,6 +16,11 @@ enum UserScripts {
         var scripts = [
             WKUserScript(
                 source: imeFixSource,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            ),
+            WKUserScript(
+                source: selectionInsertSource,
                 injectionTime: .atDocumentStart,
                 forMainFrameOnly: true
             ),
@@ -108,6 +113,184 @@ enum UserScripts {
                 event.preventDefault();
             }
         }, true);
+    })();
+    """
+
+    /// Adds the text the user had selected in another app to the composer when
+    /// the Chat Bar opens, with the caret left above it.
+    ///
+    /// Nothing here touches the send path. Intercepting Enter or the send
+    /// button means racing each provider's own state commit and reflow, which
+    /// differs per provider and breaks whenever their UI changes; placing the
+    /// text in the composer up front works identically for Enter, Command-Enter
+    /// and the mouse, and lets the user see and edit what will be sent.
+    static let selectionInsertSource = """
+    (function() {
+        'use strict';
+        if (window.__aiChatSelectionBridgeInstalled) return;
+        window.__aiChatSelectionBridgeInstalled = true;
+
+        const COMPOSER_SELECTORS = [
+            '#prompt-textarea',
+            '[data-testid="composer-text-input"]',
+            'rich-textarea [contenteditable="true"]',
+            'div.ql-editor[contenteditable="true"]',
+            'div.ProseMirror[contenteditable="true"]',
+            'div[contenteditable="true"][data-placeholder]',
+            'textarea[placeholder*="Message" i]',
+            '[contenteditable="true"]',
+            'textarea'
+        ];
+
+        function findComposer() {
+            for (const selector of COMPOSER_SELECTORS) {
+                const element = document.querySelector(selector);
+                if (element) return element;
+            }
+            return null;
+        }
+
+        function isPlainTextField(element) {
+            return element.tagName === 'TEXTAREA' || element.tagName === 'INPUT';
+        }
+
+        function contentOf(element) {
+            return isPlainTextField(element) ? element.value : element.innerText;
+        }
+
+        function quotedBlock(value) {
+            // Three leading newlines put the caret on its own line with two
+            // blank lines under it, identically on every provider.
+            return '\\n\\n\\n--- ' + value.source + ' ---\\n' + value.text;
+        }
+
+        function scrollToTop(element) {
+            element.scrollTop = 0;
+            let node = element.parentElement;
+            for (let i = 0; i < 5 && node; i++) {
+                if (node.scrollHeight > node.clientHeight) node.scrollTop = 0;
+                node = node.parentElement;
+            }
+        }
+
+        function collapseSelection(element, toStart) {
+            const selection = window.getSelection();
+            const range = document.createRange();
+            range.selectNodeContents(element);
+            range.collapse(toStart);
+            selection.removeAllRanges();
+            selection.addRange(range);
+        }
+
+        function paste(element, text) {
+            try {
+                const transfer = new DataTransfer();
+                transfer.setData('text/plain', text);
+                element.dispatchEvent(new ClipboardEvent('paste', {
+                    clipboardData: transfer,
+                    bubbles: true,
+                    cancelable: true
+                }));
+            } catch (_) {}
+        }
+
+        function waitForChange(element, before, attempts, done) {
+            if (contentOf(element) !== before) { done(true); return; }
+            if (attempts <= 0) { done(false); return; }
+            setTimeout(function() {
+                waitForChange(element, before, attempts - 1, done);
+            }, 25);
+        }
+
+        // Each strategy is verified against the composer's own content, because
+        // a rich editor can accept and silently discard an event it does not
+        // understand, and WebKit may drop the clipboardData carried by a
+        // constructed ClipboardEvent.
+        //
+        // The check has to be asynchronous: ProseMirror and Quill commit a
+        // paste through their own transaction, which lands a tick or more after
+        // the event is dispatched. Reading the content synchronously reports
+        // failure for a paste that did work, runs the fallback as well, and
+        // inserts the quotation twice.
+        function insert(element, text, done) {
+            element.focus();
+
+            if (isPlainTextField(element)) {
+                // React tracks the previous value on the node, so the native
+                // setter is needed for it to observe the change at all.
+                const prototype = element.tagName === 'TEXTAREA'
+                    ? window.HTMLTextAreaElement.prototype
+                    : window.HTMLInputElement.prototype;
+                const setter = Object.getOwnPropertyDescriptor(prototype, 'value').set;
+                setter.call(element, element.value + text);
+                element.dispatchEvent(new Event('input', { bubbles: true }));
+                done(true);
+                return;
+            }
+
+            if (!element.isContentEditable) { done(false); return; }
+
+            const before = contentOf(element);
+            collapseSelection(element, false);
+
+            // Paste is tried first: it is the only route that survives as
+            // separate paragraphs in both ProseMirror and Quill.
+            paste(element, text);
+            waitForChange(element, before, 6, function(pasted) {
+                if (pasted) { done(true); return; }
+                try {
+                    document.execCommand('insertText', false, text);
+                } catch (_) {}
+                waitForChange(element, before, 4, done);
+            });
+        }
+
+        // A single placement is not enough: ProseMirror restores its own
+        // selection when the paste transaction commits, which can land after
+        // the caret has been moved and drops it back below the quotation.
+        // Reapplying briefly wins that race, and the content guard stops the
+        // moment the user types so their caret is never yanked backwards.
+        function settleCaretAtTop(composer, guard, attempts) {
+            if (contentOf(composer) !== guard) return;
+
+            if (isPlainTextField(composer)) {
+                composer.setSelectionRange(0, 0);
+            } else {
+                collapseSelection(composer, true);
+            }
+            scrollToTop(composer);
+
+            if (attempts <= 0) return;
+            setTimeout(function() {
+                settleCaretAtTop(composer, guard, attempts - 1);
+            }, 60);
+        }
+
+        window.__aiChatInsertSelection = function(value) {
+            if (!value || !value.text) return false;
+            const text = quotedBlock(value);
+            let tries = 0;
+
+            function attempt() {
+                const composer = findComposer();
+                if (!composer) {
+                    // The provider page may still be building its composer.
+                    if (++tries < 40) setTimeout(attempt, 75);
+                    return;
+                }
+                // Reopening the Chat Bar over an unsent draft must not stack a
+                // second copy of the same quotation.
+                if (contentOf(composer).indexOf(value.text) !== -1) return;
+
+                insert(composer, text, function(inserted) {
+                    if (!inserted) return;
+                    settleCaretAtTop(composer, contentOf(composer), 4);
+                });
+            }
+
+            attempt();
+            return true;
+        };
     })();
     """
 
@@ -367,6 +550,13 @@ enum UserScripts {
                 forcedStateUntil = Date.now() + 1500;
                 publishState(state, true);
                 scheduleBurst();
+                // The burst above runs entirely inside the forced window, where
+                // a contradicting result is ignored, so it can only confirm the
+                // intended state. These two passes run after the window closes
+                // and are what correct the colour when the provider did not
+                // actually act on the shortcut.
+                schedule(1600);
+                schedule(2600);
             };
             window.__aiChatIsPrivateChatActive = function() {
                 return lastState === true;
@@ -418,10 +608,11 @@ enum UserScripts {
                     setTimeout(start, 25);
                     return;
                 }
+                // Detected once for the state the page loads in. Every later
+                // change is driven by the event that caused it: the shortcut
+                // hooks above, a click on a provider control, or a navigation.
+                // Nothing polls.
                 detectAndPublish();
-                // A low-frequency backstop catches asynchronous state changes
-                // without observing every token streamed into the conversation.
-                setInterval(detectAndPublish, 2000);
             }
 
             if (document.readyState === 'loading') {

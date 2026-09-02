@@ -24,7 +24,7 @@
 /* Begin PBXFileReference section */
 		A1C4B0012F21000100A1C4B0 /* AIChatTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AIChatTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1C4B0022F21000100A1C4B0 /* ProviderArchitectureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderArchitectureTests.swift; sourceTree = "<group>"; };
-		74CBD8AA2EED8FCB00F226E3 /* AI Chat.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "AI Chat.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		74CBD8AA2EED8FCB00F226E3 /* Thinspace.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Thinspace.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -55,6 +55,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				"NSScreen+Extensions.swift",
+				SelectionCapture.swift,
 				UserDefaultsKeys.swift,
 			);
 			target = 74CBD8A92EED8FCB00F226E3 /* AIChat */;
@@ -165,7 +166,7 @@
 		74CBD8AB2EED8FCB00F226E3 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				74CBD8AA2EED8FCB00F226E3 /* AI Chat.app */,
+				74CBD8AA2EED8FCB00F226E3 /* Thinspace.app */,
 				A1C4B0012F21000100A1C4B0 /* AIChatTests.xctest */,
 			);
 			name = Products;
@@ -224,7 +225,7 @@
 				74CBD8BF2EED900000F226E3 /* KeyboardShortcuts */,
 			);
 			productName = AIChat;
-			productReference = 74CBD8AA2EED8FCB00F226E3 /* AI Chat.app */;
+			productReference = 74CBD8AA2EED8FCB00F226E3 /* Thinspace.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -314,13 +315,13 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.2;
-				PRODUCT_BUNDLE_IDENTIFIER = com.0ssamaak0.aichat.tests;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.0ssamaak0.thinspace.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AI Chat.app/Contents/MacOS/AI Chat";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Thinspace.app/Contents/MacOS/Thinspace";
 			};
 			name = Debug;
 		};
@@ -333,13 +334,13 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.2;
-				PRODUCT_BUNDLE_IDENTIFIER = com.0ssamaak0.aichat.tests;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.0ssamaak0.thinspace.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AI Chat.app/Contents/MacOS/AI Chat";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Thinspace.app/Contents/MacOS/Thinspace";
 			};
 			name = Release;
 		};
@@ -476,12 +477,12 @@
 				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Resources/AIChat.entitlements;
+				CODE_SIGN_ENTITLEMENTS = Resources/Thinspace.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readwrite;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
@@ -498,20 +499,20 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "AI Chat";
+				INFOPLIST_KEY_CFBundleDisplayName = "Thinspace";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_NSCameraUsageDescription = "AI Chat uses camera access when a provider requests video or image capture.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Thinspace uses camera access when a provider requests video or image capture.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "AI Chat uses microphone access when a provider requests voice input.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Thinspace uses microphone access when a provider requests voice input.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.2;
-				PRODUCT_BUNDLE_IDENTIFIER = com.0ssamaak0.aichat;
-				PRODUCT_NAME = "AI Chat";
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.0ssamaak0.thinspace;
+				PRODUCT_NAME = "Thinspace";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -525,12 +526,12 @@
 				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Resources/AIChat.entitlements;
+				CODE_SIGN_ENTITLEMENTS = Resources/Thinspace.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readwrite;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
@@ -547,20 +548,20 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "AI Chat";
+				INFOPLIST_KEY_CFBundleDisplayName = "Thinspace";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_NSCameraUsageDescription = "AI Chat uses camera access when a provider requests video or image capture.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Thinspace uses camera access when a provider requests video or image capture.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "AI Chat uses microphone access when a provider requests voice input.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Thinspace uses microphone access when a provider requests voice input.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.2;
-				PRODUCT_BUNDLE_IDENTIFIER = com.0ssamaak0.aichat;
-				PRODUCT_NAME = "AI Chat";
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.0ssamaak0.thinspace;
+				PRODUCT_NAME = "Thinspace";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;

@@ -1,6 +1,6 @@
 //
 //  AppDelegate.swift
-//  AI Chat
+//  Thinspace
 //
 
 import AppKit

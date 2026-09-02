@@ -1,6 +1,6 @@
-# Build AI Chat
+# Build Thinspace
 
-AI Chat targets macOS 26 and Apple silicon. The project intentionally does not
+Thinspace targets macOS 26 and Apple silicon. The project intentionally does not
 contain a development team or release provisioning profile.
 
 Build an unsigned local release from the repository root:
@@ -21,8 +21,8 @@ Create the disk image:
 
 ```bash
 ./scripts/create-dmg.sh \
-  "./build/DerivedData/Build/Products/Release/AI Chat.app" \
+  "./build/DerivedData/Build/Products/Release/Thinspace.app" \
   ./build
 ```
 
-The resulting disk image is `./build/AIChat.dmg`.
+The resulting disk image is `./build/Thinspace.dmg`.

@@ -1,6 +1,6 @@
 //
 //  ProviderAdapter.swift
-//  AI Chat
+//  Thinspace
 //
 
 import Foundation

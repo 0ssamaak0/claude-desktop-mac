@@ -1,6 +1,6 @@
 //
 //  ClaudeProviderAdapter.swift
-//  AI Chat
+//  Thinspace
 //
 
 import Foundation
@@ -89,14 +89,14 @@ struct ClaudeProviderAdapter: ProviderAdapter {
                     if (window.__aiChatSetPrivateChatState) {
                         window.__aiChatSetPrivateChatState(true);
                     }
-                    console.log('[AI Chat] Claude private chat activated');
+                    console.log('[Thinspace] Claude private chat activated');
                     return;
                 }
                 tries += 1;
                 if (tries < MAX_TRIES) {
                     setTimeout(attempt, 100);
                 } else {
-                    console.log('[AI Chat] Claude private chat control not found');
+                    console.log('[Thinspace] Claude private chat control not found');
                 }
             }
 
@@ -227,7 +227,7 @@ struct ClaudeProviderAdapter: ProviderAdapter {
                 const element = document.querySelector(selector);
                 if (element) {
                     element.click();
-                    console.log('[AI Chat] \(actionName) toggled');
+                    console.log('[Thinspace] \(actionName) toggled');
                     return true;
                 }
             }

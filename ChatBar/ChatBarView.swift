@@ -1,6 +1,6 @@
 //
 //  ChatBarView.swift
-//  AI Chat
+//  Thinspace
 //
 //  Created by alexcding on 2025-12-13.
 //

@@ -1,6 +1,6 @@
 //
 //  WebViewModel.swift
-//  AI Chat
+//  Thinspace
 //
 
 import AppKit
@@ -326,6 +326,27 @@ final class WebViewModel {
     func focusComposer() {
         resumeIfSuspended()
         adapter.focusComposer(in: wkWebView)
+    }
+
+    // MARK: - Captured selection
+
+    /// Adds the captured selection to the composer, leaving the caret above it.
+    func insertCapturedSelection(_ selection: CapturedSelection) {
+        guard let data = try? JSONSerialization.data(withJSONObject: [
+            "text": selection.text,
+            "source": selection.sourceLabel
+        ]), let payload = String(data: data, encoding: .utf8) else { return }
+
+        // Guarded because the bridge is absent until the provider page has
+        // loaded, and the WebView may be showing a non-provider page.
+        wkWebView.evaluateJavaScript(
+            """
+            if (window.__aiChatInsertSelection) {
+                window.__aiChatInsertSelection(\(payload));
+            }
+            """,
+            completionHandler: nil
+        )
     }
 
     // MARK: - Browser policy API

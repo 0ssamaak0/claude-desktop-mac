@@ -1,6 +1,8 @@
-# AI Chat for macOS
+# Thinspace
 
-AI Chat is an unofficial macOS wrapper for the official
+**Big AI. Very little app.**
+
+Thinspace is an unofficial macOS wrapper for the official
 [Claude](https://claude.ai), [Gemini](https://gemini.google.com), and
 [ChatGPT](https://chatgpt.com) web apps. It
 keeps the familiar websites intact while providing one lightweight native app,
@@ -9,25 +11,28 @@ one floating Chat Bar, and one set of shortcuts.
 Choose Claude, Gemini, or ChatGPT in Settings. Each provider keeps its own
 persistent website session, so you can sign in to all three and switch without
 signing in again.
-To keep memory use low, AI Chat runs only the active provider's WebView; switching
+To keep memory use low, Thinspace runs only the active provider's WebView; switching
 providers opens that provider's home page.
 
-AI Chat uses the providers' websites. It is not an API client and does not need
+Thinspace uses the providers' websites. It is not an API client and does not need
 provider API keys.
+
+A *thin space* is the narrowest deliberate gap in typesetting. That is the whole
+idea: the smallest thing that can sit between you and three very large web apps.
 
 ## Screenshots
 
 ### Main window — Claude selected
 
-![AI Chat main window with Claude selected](docs/desktop.png)
+![Thinspace main window with Claude selected](docs/desktop.png)
 
 ### Provider switching
 
-![AI Chat settings showing Claude, Gemini, and ChatGPT](docs/provider_settings.png)
+![Thinspace settings showing Claude, Gemini, and ChatGPT](docs/provider_settings.png)
 
 ### Floating Chat Bar — Claude selected
 
-![AI Chat floating Chat Bar with Claude selected](docs/chat_bar.png)
+![Thinspace floating Chat Bar with Claude selected](docs/chat_bar.png)
 
 ## Features
 
@@ -46,18 +51,52 @@ provider API keys.
 - Shared zoom and user-agent settings
 - Launch at login, optional hidden Dock icon, and optional hidden launch window
 - Uploads, downloads, camera, and microphone support when a provider requests them
-- App Sandbox, hardened runtime, and outbound-network-only access
+- Optional Text Capture: opens the Chat Bar with the text selected in another
+  app already quoted, labelled with its app and document name
+- Hardened runtime and outbound-network-only access
 
-Because AI Chat integrates with live websites, a provider can change its page
+Because Thinspace integrates with live websites, a provider can change its page
 structure or embedded-browser behavior at any time.
 
 ## Privacy and authentication
 
-Each provider handles authentication on its own website. AI Chat does not
+Each provider handles authentication on its own website. Thinspace does not
 intercept your credentials, proxy conversations through an app-owned server, or
 add analytics. Web content, cookies, cache, and sessions use macOS WebKit storage.
 
 The Reset Website Data action clears the stored website data for all providers.
+
+### Text Capture
+
+Text Capture is off by default. While it is off, Thinspace observes nothing
+outside its own windows, makes no Accessibility calls, and never shows the
+system Accessibility prompt — turning the setting on is the only thing that can
+trigger it.
+
+With it on, opening the Chat Bar quotes the text you had selected in the app you
+were using, labelled with the app and, where the app exposes one, the document
+name or window title. The caret is left above the quotation, so you type your
+instruction and send as usual:
+
+```
+Explain this            <- the caret starts here
+
+--- Preview · quantization.pdf ---
+[the text you had selected]
+```
+
+The quotation is ordinary composer text, so Enter, Command-Enter and the send
+button all behave normally, and you can edit or delete it before sending.
+Nothing is captured while the Chat Bar is closed and nothing is stored on disk.
+Because the quotation becomes part of your message, it is sent to whichever
+provider is active — review it before sending anything you would not paste in
+yourself.
+
+Reading a selection out of another application requires the macOS Accessibility
+permission, which macOS does not grant to sandboxed apps. Thinspace therefore
+ships without the App Sandbox as of 1.0. The hardened runtime is unchanged, and
+web content still runs in WebKit's own sandboxed content processes, which the app
+neither controls nor weakens — the untrusted surface stays confined either way.
 
 ## Requirements
 
@@ -66,8 +105,15 @@ The Reset Website Data action clears the stored website data for all providers.
 
 ## Install
 
-Download a release from this repository's **Releases** page, or build the app
-from source.
+Download `Thinspace.dmg` from this repository's **Releases** page, or build from
+source.
+
+Releases are unsigned, so on first launch macOS will refuse to open the app.
+Right-click it in Finder and choose **Open**, or run:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Thinspace.app"
+```
 
 ```bash
 git clone https://github.com/0ssamaak0/ai-chat-mac.git
@@ -75,9 +121,10 @@ cd ai-chat-mac
 open AIChat.xcodeproj
 ```
 
-Select the `AIChat` scheme in Xcode and run it on **My Mac**. For an unsigned
-command-line release build and DMG instructions, see
-[build_instructions.md](build_instructions.md).
+Select the `AIChat` scheme in Xcode and run it on **My Mac**. The Xcode project,
+scheme and target are still named `AIChat` internally; the built product is
+`Thinspace.app`. For an unsigned command-line release build and DMG
+instructions, see [build_instructions.md](build_instructions.md).
 
 Run the provider architecture tests from the command line:
 
@@ -96,7 +143,7 @@ version 3.0.1.
 
 ## Unofficial app and trademarks
 
-AI Chat is not affiliated with, endorsed by, or sponsored by Anthropic, Google,
+Thinspace is not affiliated with, endorsed by, or sponsored by Anthropic, Google,
 or OpenAI. Claude is a trademark of Anthropic PBC. Gemini and Google are
 trademarks of Google LLC. ChatGPT and OpenAI are trademarks of OpenAI. All
 provider names, marks, website content, and services belong to their respective
@@ -109,7 +156,7 @@ This repository is distributed under the
 The license permits sharing and adaptation with attribution for noncommercial
 purposes; it does not permit commercial use.
 
-AI Chat is an adapted work based on
+Thinspace is an adapted work based on
 [Gemini Desktop](https://github.com/alexcding/gemini-desktop-mac) by alexcding.
 The original copyright and license notice is preserved in [LICENSE](LICENSE).
 Changes were made to add Claude and ChatGPT support and combine all three web

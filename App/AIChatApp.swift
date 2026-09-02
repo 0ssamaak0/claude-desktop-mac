@@ -1,6 +1,6 @@
 //
 //  AIChatApp.swift
-//  AI Chat
+//  Thinspace
 //
 //  Created by alexcding on 2025-12-13.
 //
@@ -190,8 +190,8 @@ struct AIChatApp: App {
         MenuBarExtra {
             MenuBarView(coordinator: coordinator)
         } label: {
-            Image(systemName: Constants.menuBarIcon)
-                .symbolRenderingMode(.monochrome)
+            Image(Constants.menuBarIcon)
+                .renderingMode(.template)
                 .onAppear(perform: configureLaunchVisibility)
         }
         .menuBarExtraStyle(.menu)
@@ -199,6 +199,7 @@ struct AIChatApp: App {
 
     init() {
         AppTheme.current.apply()
+        SelectionCaptureService.shared.syncWithPreference()
 
         KeyboardShortcuts.onKeyDown(for: .bringToFront) { [self] in
             coordinator.toggleChatBar()
@@ -243,7 +244,9 @@ extension AIChatApp {
         static let settingsWindowDefaultHeight: CGFloat = 600
 
         static let mainWindowID = "main"
-        static let menuBarIcon = "bubble.left.and.bubble.right"
+        /// Template image set in the asset catalog, not an SF Symbol: the mark
+        /// is redrawn for menu bar size rather than scaled from the app icon.
+        static let menuBarIcon = "MenuBarIcon"
         static let hideWindowDelay: TimeInterval = 0.1
     }
 }

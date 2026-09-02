@@ -1,6 +1,6 @@
 //
 //  UserDefaultsKeys.swift
-//  AI Chat
+//  Thinspace
 //
 //  Created by alexcding on 2025-12-13.
 //
@@ -21,6 +21,7 @@ enum UserDefaultsKeys: String {
     case panelX
     case panelY
     case alwaysOnTop
+    case captureSelectedText
 }
 
 enum AppTheme: String, CaseIterable {

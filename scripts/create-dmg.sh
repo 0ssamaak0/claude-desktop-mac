@@ -1,17 +1,17 @@
 #!/bin/bash
 
-# Create a DMG for AI Chat.
-# Usage: ./scripts/create-dmg.sh [path/to/AI Chat.app] [output_dir]
+# Create a DMG for Thinspace.
+# Usage: ./scripts/create-dmg.sh [path/to/Thinspace.app] [output_dir]
 # Defaults: ~/Downloads/AIChat for both the app parent and DMG output.
 
 set -euo pipefail
 
-APP_NAME="AI Chat"
-DEFAULT_DIR="$HOME/Downloads/AIChat"
+APP_NAME="Thinspace"
+DEFAULT_DIR="$HOME/Downloads/Thinspace"
 APP_PATH="${1:-$DEFAULT_DIR/${APP_NAME}.app}"
 OUTPUT_DIR="${2:-$DEFAULT_DIR}"
-DMG_FINAL="${OUTPUT_DIR}/AIChat.dmg"
-VOLUME_NAME="AI Chat"
+DMG_FINAL="${OUTPUT_DIR}/Thinspace.dmg"
+VOLUME_NAME="Thinspace"
 
 echo "Creating DMG for ${APP_NAME}..."
 
