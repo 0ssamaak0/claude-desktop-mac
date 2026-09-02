@@ -116,8 +116,8 @@ xattr -dr com.apple.quarantine "/Applications/Thinspace.app"
 ```
 
 ```bash
-git clone https://github.com/0ssamaak0/ai-chat-mac.git
-cd ai-chat-mac
+git clone https://github.com/0ssamaak0/Thinspace.git
+cd Thinspace
 open AIChat.xcodeproj
 ```
 
