@@ -36,7 +36,8 @@ struct GeminiProviderAdapter: ProviderAdapter {
 
     func openNewChat(in webView: WKWebView) {
         dispatchKeyboardShortcut(
-            key: "o", code: "KeyO", keyCode: 79, shift: true, in: webView
+            key: "o", code: "KeyO", keyCode: 79, shift: true,
+            privateChatState: false, in: webView
         )
     }
 
@@ -76,6 +77,9 @@ struct GeminiProviderAdapter: ProviderAdapter {
                 const temporary = first(temporarySelectors);
                 if (temporary) {
                     temporary.click();
+                    if (window.__aiChatSetPrivateChatState) {
+                        window.__aiChatSetPrivateChatState(true);
+                    }
                     if (sidebarWasOpened) {
                         setTimeout(function() {
                             const sidebar = first(sidebarSelectors);
@@ -163,6 +167,29 @@ struct GeminiProviderAdapter: ProviderAdapter {
         return scroller.querySelector(
             '[aria-label="Good response"], [aria-label="Bad response"]'
         ) !== null;
+    }
+    """
+
+    let privateChatObserverSource = """
+    function detectProviderPrivateChatState() {
+        const urlState = privateChatStateFromURL();
+        if (urlState !== null) return urlState;
+
+        const controlState = privateChatStateFromElements([
+            '[data-test-id="temp-chat-button"]',
+            '[data-test-id="temporary-chat"]',
+            '[data-test-id*="temporary-chat" i]',
+            'button[aria-label*="temporary chat" i]',
+            'button[title*="temporary chat" i]',
+            '[role="button"][aria-label*="temporary chat" i]'
+        ]);
+        if (controlState !== null) return controlState;
+
+        return hasPrivateChatIndicator([
+            'main [role="status"]',
+            'main [aria-label*="temporary chat" i]',
+            'main [data-test-id*="temporary-chat" i]'
+        ], /temporary chat/i) ? true : null;
     }
     """
 }

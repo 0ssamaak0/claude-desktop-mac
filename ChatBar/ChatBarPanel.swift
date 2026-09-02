@@ -62,6 +62,7 @@ final class ChatBarPanel: NSPanel, NSWindowDelegate {
     private var sizeSaveWork: DispatchWorkItem?
     private var clickOutsideMonitor: Any?
     private weak var webViewModel: WebViewModel?
+    private var glassEffectView: ChatBarGlassEffectView?
     private let onRequestDismiss: () -> Void
 
     init(
@@ -87,6 +88,7 @@ final class ChatBarPanel: NSPanel, NSWindowDelegate {
         )
 
         let glassView = ChatBarGlassEffectView(frame: contentLayoutRect)
+        glassEffectView = glassView
         let contentContainer = NSView(frame: glassView.bounds)
         hostedContentView.frame = contentContainer.bounds.insetBy(
             dx: Constants.glassRimWidth,
@@ -105,6 +107,10 @@ final class ChatBarPanel: NSPanel, NSWindowDelegate {
 
         configureWindow()
         configureAppearance()
+        updateChatAppearance(
+            provider: webViewModel.provider,
+            isPrivateChat: webViewModel.isInPrivateChat
+        )
 
         webViewModel.onConversationStarted = { [weak self] in
             guard let self, self.isVisible else { return }
@@ -113,6 +119,20 @@ final class ChatBarPanel: NSPanel, NSWindowDelegate {
             } else {
                 self.pendingConversationExpansion = true
             }
+        }
+        webViewModel.onPrivateChatStateChanged = { [weak self] isActive in
+            guard let self, let webViewModel = self.webViewModel else { return }
+            self.updateChatAppearance(
+                provider: webViewModel.provider,
+                isPrivateChat: isActive
+            )
+        }
+        webViewModel.onProviderChanged = { [weak self] provider in
+            guard let self, let webViewModel = self.webViewModel else { return }
+            self.updateChatAppearance(
+                provider: provider,
+                isPrivateChat: webViewModel.isInPrivateChat
+            )
         }
     }
 
@@ -170,6 +190,15 @@ final class ChatBarPanel: NSPanel, NSWindowDelegate {
         backgroundColor = .clear
         isOpaque = false
         animationBehavior = .none
+    }
+
+    private func updateChatAppearance(
+        provider: LLMProvider,
+        isPrivateChat: Bool
+    ) {
+        glassEffectView?.tintColor = isPrivateChat
+            ? Constants.privateChatTintColor
+            : Constants.normalChatTintColor(for: provider)
     }
 
     /// Resolves the correct size before the panel's final presentation frame is
@@ -546,10 +575,22 @@ extension ChatBarPanel {
         static let minHeight: CGFloat = 150
         static let maxWidth: CGFloat = 900
         static let maxHeight: CGFloat = 900
-        static let glassRimWidth: CGFloat = 15
+        static let glassRimWidth: CGFloat = 10
         static let chromeExpansion: CGFloat = glassRimWidth * 2
         static let cornerRadius: CGFloat = 30
         static let innerCornerRadius: CGFloat = cornerRadius - glassRimWidth
+        static let privateChatTintColor = NSColor.white.withAlphaComponent(0.50)
+
+        static func normalChatTintColor(for provider: LLMProvider) -> NSColor {
+            switch provider {
+            case .gemini:
+                return NSColor.systemBlue.withAlphaComponent(0.10)
+            case .claude:
+                return NSColor.systemOrange.withAlphaComponent(0.10)
+            case .chatgpt:
+                return NSColor.white.withAlphaComponent(0.10)
+            }
+        }
         static let expandedScreenRatio: CGFloat = 0.7
         static let animationDuration: TimeInterval = 0.3
         static let showDuration: TimeInterval = 0.16

@@ -5,9 +5,29 @@
 
 import Foundation
 import AppKit
+import JavaScriptCore
 import KeyboardShortcuts
+import WebKit
 import XCTest
 @testable import AI_Chat
+
+private final class RecordingWebView: WKWebView {
+    private(set) var evaluatedScripts: [String] = []
+    private(set) var loadedRequests: [URLRequest] = []
+
+    override func evaluateJavaScript(
+        _ javaScriptString: String,
+        completionHandler: (@MainActor @Sendable (Any?, (any Error)?) -> Void)? = nil
+    ) {
+        evaluatedScripts.append(javaScriptString)
+        completionHandler?(true, nil)
+    }
+
+    override func load(_ request: URLRequest) -> WKNavigation? {
+        loadedRequests.append(request)
+        return nil
+    }
+}
 
 final class LLMProviderTests: XCTestCase {
     func testProviderIdentityIsStableAndComplete() {
@@ -96,12 +116,28 @@ final class LLMProviderTests: XCTestCase {
 
 final class ChatBarPresentationTests: XCTestCase {
     func testGlassChromeAndSwipeAnimationsStayRestrained() {
-        XCTAssertEqual(ChatBarPanel.Constants.glassRimWidth, 15)
-        XCTAssertEqual(ChatBarPanel.Constants.chromeExpansion, 30)
-        XCTAssertEqual(ChatBarPanel.Constants.innerCornerRadius, 15)
+        XCTAssertEqual(ChatBarPanel.Constants.glassRimWidth, 10)
+        XCTAssertEqual(ChatBarPanel.Constants.chromeExpansion, 20)
+        XCTAssertEqual(ChatBarPanel.Constants.innerCornerRadius, 20)
         XCTAssertLessThanOrEqual(ChatBarPanel.Constants.showDuration, 0.16)
         XCTAssertLessThanOrEqual(ChatBarPanel.Constants.hideDuration, 0.12)
         XCTAssertLessThanOrEqual(ChatBarPanel.Constants.verticalMotionOffset, 20)
+        XCTAssertEqual(
+            ChatBarPanel.Constants.privateChatTintColor.alphaComponent,
+            0.50,
+            accuracy: 0.001
+        )
+
+        let expectedNormalTints: [LLMProvider: NSColor] = [
+            .gemini: NSColor.systemBlue.withAlphaComponent(0.10),
+            .claude: NSColor.systemOrange.withAlphaComponent(0.10),
+            .chatgpt: NSColor.white.withAlphaComponent(0.10)
+        ]
+        for (provider, expectedColor) in expectedNormalTints {
+            let tint = ChatBarPanel.Constants.normalChatTintColor(for: provider)
+            XCTAssertEqual(tint.alphaComponent, 0.10, accuracy: 0.001)
+            XCTAssertEqual(tint, expectedColor, provider.displayName)
+        }
     }
 
     func testWindowFrameIsAnimatableButFrameOriginIsNot() {
@@ -113,7 +149,7 @@ final class ChatBarPresentationTests: XCTestCase {
         let contentSize = NSSize(width: 500, height: 459)
         let panelSize = ChatBarPanel.panelSize(forContentSize: contentSize)
 
-        XCTAssertEqual(panelSize, NSSize(width: 530, height: 489))
+        XCTAssertEqual(panelSize, NSSize(width: 520, height: 479))
         XCTAssertEqual(
             ChatBarPanel.contentSize(forPanelSize: panelSize),
             contentSize
@@ -123,11 +159,94 @@ final class ChatBarPresentationTests: XCTestCase {
         let panelOrigin = ChatBarPanel.panelOrigin(
             forContentOrigin: contentOrigin
         )
-        XCTAssertEqual(panelOrigin, NSPoint(x: 285, y: 35))
+        XCTAssertEqual(panelOrigin, NSPoint(x: 290, y: 40))
         XCTAssertEqual(
             ChatBarPanel.contentOrigin(forPanelOrigin: panelOrigin),
             contentOrigin
         )
+    }
+}
+
+final class ProviderUserScriptTests: XCTestCase {
+    func testEveryProviderInstallsItsPrivateChatDetector() {
+        for provider in LLMProvider.allCases {
+            let adapter = ProviderAdapters.adapter(for: provider)
+            let privateChatScripts = UserScripts.createAllScripts(for: adapter).filter {
+                $0.source.contains("__aiChatPrivateChatObserverInstalled")
+            }
+
+            XCTAssertEqual(privateChatScripts.count, 1, provider.displayName)
+            XCTAssertTrue(
+                privateChatScripts[0].source.contains(adapter.privateChatObserverSource),
+                provider.displayName
+            )
+            XCTAssertTrue(
+                privateChatScripts[0].source.contains(UserScripts.privateChatStateHandler),
+                provider.displayName
+            )
+        }
+    }
+
+    func testEveryProviderPrivateChatObserverHasValidJavaScriptSyntax() throws {
+        let context = try XCTUnwrap(JSContext())
+
+        for provider in LLMProvider.allCases {
+            let adapter = ProviderAdapters.adapter(for: provider)
+            let source = try XCTUnwrap(
+                UserScripts.createAllScripts(for: adapter).first {
+                    $0.source.contains("__aiChatPrivateChatObserverInstalled")
+                }?.source
+            )
+            let encodedData = try JSONSerialization.data(
+                withJSONObject: source,
+                options: .fragmentsAllowed
+            )
+            let encodedSource = try XCTUnwrap(
+                String(data: encodedData, encoding: .utf8)
+            )
+
+            context.exception = nil
+            context.evaluateScript("new Function(\(encodedSource));")
+            XCTAssertNil(context.exception, provider.displayName)
+        }
+    }
+
+    func testEveryProviderNormalChatActionClearsPagePrivateState() {
+        for provider in LLMProvider.allCases {
+            let webView = RecordingWebView()
+            ProviderAdapters.adapter(for: provider).openNewChat(in: webView)
+
+            XCTAssertTrue(
+                webView.evaluatedScripts.contains {
+                    $0.contains("__aiChatSetPrivateChatState(false)")
+                },
+                provider.displayName
+            )
+        }
+    }
+
+    func testClaudePrivateChatExitLoadsNormalHomeWhileOthersUseNewChatAction() {
+        let claudeWebView = RecordingWebView()
+        ClaudeProviderAdapter().exitPrivateChat(in: claudeWebView)
+        XCTAssertEqual(
+            claudeWebView.loadedRequests.last?.url,
+            ClaudeProviderAdapter().homeURL
+        )
+
+        for adapter in [
+            ProviderAdapters.adapter(for: .gemini),
+            ProviderAdapters.adapter(for: .chatgpt)
+        ] {
+            let webView = RecordingWebView()
+            adapter.exitPrivateChat(in: webView)
+            XCTAssertTrue(webView.loadedRequests.isEmpty, adapter.provider.displayName)
+            XCTAssertTrue(
+                webView.evaluatedScripts.contains {
+                    $0.contains("__aiChatSetPrivateChatState(false)")
+                },
+                adapter.provider.displayName
+            )
+        }
     }
 }
 

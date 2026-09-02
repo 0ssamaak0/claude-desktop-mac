@@ -52,10 +52,12 @@ protocol ProviderAdapter {
     var authenticationHosts: HostPolicy { get }
     var mediaHosts: HostPolicy { get }
     var conversationObserverSource: String { get }
+    var privateChatObserverSource: String { get }
     var privateChatStartsAtHome: Bool { get }
 
     func page(for url: URL) -> ProviderPage
     func openNewChat(in webView: WKWebView)
+    func exitPrivateChat(in webView: WKWebView)
     func activatePrivateChat(in webView: WKWebView)
     func toggleSidebar(in webView: WKWebView)
     func openNewProject(in webView: WKWebView)
@@ -68,6 +70,10 @@ protocol ProviderAdapter {
 extension ProviderAdapter {
     var capabilities: ProviderCapabilities { provider.capabilities }
     var privateChatStartsAtHome: Bool { false }
+
+    func exitPrivateChat(in webView: WKWebView) {
+        openNewChat(in: webView)
+    }
 
     func classify(_ url: URL) -> ProviderURLClassification {
         guard let host = url.host else { return .external }
@@ -117,10 +123,23 @@ extension ProviderAdapter {
         keyCode: Int,
         shift: Bool,
         meta: Bool = true,
+        privateChatState: Bool? = nil,
         in webView: WKWebView
     ) {
+        let privateChatPrelude: String
+        if let privateChatState {
+            privateChatPrelude = """
+            if (window.__aiChatSetPrivateChatState) {
+                window.__aiChatSetPrivateChatState(\(privateChatState ? "true" : "false"));
+            }
+            """
+        } else {
+            privateChatPrelude = ""
+        }
+
         let source = """
         (function() {
+            \(privateChatPrelude)
             function makeEvent() {
                 return new KeyboardEvent('keydown', {
                     key: \(Self.javaScriptString(key)),

@@ -38,7 +38,8 @@ struct ChatGPTProviderAdapter: ProviderAdapter {
 
     func openNewChat(in webView: WKWebView) {
         dispatchKeyboardShortcut(
-            key: "o", code: "KeyO", keyCode: 79, shift: true, in: webView
+            key: "o", code: "KeyO", keyCode: 79, shift: true,
+            privateChatState: false, in: webView
         )
     }
 
@@ -167,6 +168,9 @@ struct ChatGPTProviderAdapter: ProviderAdapter {
             function verifyActivation(match, allowMenuFallback) {
                 const currentMatch = findControl() || match;
                 if (isActive(currentMatch.control, currentMatch.evidence)) {
+                    if (window.__aiChatSetPrivateChatState) {
+                        window.__aiChatSetPrivateChatState(true);
+                    }
                     console.log('[AI Chat] ChatGPT temporary chat activated');
                     return;
                 }
@@ -180,6 +184,9 @@ struct ChatGPTProviderAdapter: ProviderAdapter {
                     return;
                 }
 
+                if (window.__aiChatSetPrivateChatState) {
+                    window.__aiChatSetPrivateChatState(true);
+                }
                 console.log('[AI Chat] ChatGPT temporary chat control clicked; state not exposed');
             }
 
@@ -187,6 +194,9 @@ struct ChatGPTProviderAdapter: ProviderAdapter {
                 const match = findControl();
                 if (match) {
                     if (isActive(match.control, match.evidence)) {
+                        if (window.__aiChatSetPrivateChatState) {
+                            window.__aiChatSetPrivateChatState(true);
+                        }
                         console.log('[AI Chat] ChatGPT temporary chat already active');
                         return;
                     }
@@ -254,6 +264,30 @@ struct ChatGPTProviderAdapter: ProviderAdapter {
         return document.querySelector(
             '[data-testid^="conversation-turn-"], [data-message-author-role]'
         ) !== null;
+    }
+    """
+
+    let privateChatObserverSource = """
+    function detectProviderPrivateChatState() {
+        const urlState = privateChatStateFromURL();
+        if (urlState !== null) return urlState;
+
+        const controlState = privateChatStateFromElements([
+            'button[data-testid="temporary-chat-button"]',
+            '[role="button"][data-testid="temporary-chat-button"]',
+            'button[data-testid="temporary-chat-toggle"]',
+            '[role="button"][data-testid="temporary-chat-toggle"]',
+            'button[aria-label*="temporary chat" i]',
+            'button[title*="temporary chat" i]',
+            '[role="button"][aria-label*="temporary chat" i]'
+        ]);
+        if (controlState !== null) return controlState;
+
+        return hasPrivateChatIndicator([
+            'main [role="status"]',
+            'main [data-testid*="temporary-chat" i]',
+            'main [aria-label*="temporary chat" i]'
+        ], /temporary( chat)?/i) ? true : null;
     }
     """
 }

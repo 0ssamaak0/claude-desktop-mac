@@ -31,8 +31,15 @@ struct ClaudeProviderAdapter: ProviderAdapter {
 
     func openNewChat(in webView: WKWebView) {
         dispatchKeyboardShortcut(
-            key: "o", code: "KeyO", keyCode: 79, shift: true, in: webView
+            key: "o", code: "KeyO", keyCode: 79, shift: true,
+            privateChatState: false, in: webView
         )
+    }
+
+    /// Claude's new-chat shortcut preserves Incognito mode. A fresh `/new`
+    /// navigation explicitly leaves that mode before creating the normal chat.
+    func exitPrivateChat(in webView: WKWebView) {
+        webView.load(URLRequest(url: homeURL))
     }
 
     /// Activates Claude's Incognito Chat control after WebViewModel has opened `/new`.
@@ -79,6 +86,9 @@ struct ClaudeProviderAdapter: ProviderAdapter {
                 const button = findButton();
                 if (button) {
                     button.click();
+                    if (window.__aiChatSetPrivateChatState) {
+                        window.__aiChatSetPrivateChatState(true);
+                    }
                     console.log('[AI Chat] Claude private chat activated');
                     return;
                 }
@@ -179,6 +189,29 @@ struct ClaudeProviderAdapter: ProviderAdapter {
         const main = document.querySelector('main');
         if (!main) return false;
         return main.querySelectorAll('article, [data-turn], [class*="Message"]').length >= 2;
+    }
+    """
+
+    let privateChatObserverSource = """
+    function detectProviderPrivateChatState() {
+        const urlState = privateChatStateFromURL();
+        if (urlState !== null) return urlState;
+
+        const controlState = privateChatStateFromElements([
+            '[data-testid="incognito-chat-button"]',
+            '[data-testid*="incognito" i]',
+            'button[aria-label*="incognito" i]',
+            'button[title*="incognito" i]',
+            'button[aria-label*="private chat" i]',
+            'button[title*="private chat" i]'
+        ]);
+        if (controlState !== null) return controlState;
+
+        return hasPrivateChatIndicator([
+            'main [role="status"]',
+            'main [aria-label*="incognito" i]',
+            'main [data-testid*="incognito" i]'
+        ], /incognito|private chat/i) ? true : null;
     }
     """
 

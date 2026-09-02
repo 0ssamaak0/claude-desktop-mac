@@ -34,6 +34,21 @@ final class ConversationStateHandler: NSObject, WKScriptMessageHandler {
     }
 }
 
+final class PrivateChatStateHandler: NSObject, WKScriptMessageHandler {
+    weak var model: WebViewModel?
+
+    func userContentController(
+        _ userContentController: WKUserContentController,
+        didReceive message: WKScriptMessage
+    ) {
+        guard let body = message.body as? [String: Any],
+              let inPrivateChat = body["inPrivateChat"] as? Bool else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.model?.handlePrivateChatState(inPrivateChat)
+        }
+    }
+}
+
 /// Owns the single active provider session. Provider login state lives in a
 /// separate persistent WebKit data store, while inactive providers have no
 /// WKWebView or WebContent process.
@@ -67,13 +82,17 @@ final class WebViewModel {
     private(set) var isAtHome = true
     private(set) var isLoading = true
     private(set) var isInConversation = false
+    private(set) var isInPrivateChat = false
     private(set) var isSuspended = false
 
     var onConversationStarted: (() -> Void)?
+    var onPrivateChatStateChanged: ((Bool) -> Void)?
+    var onProviderChanged: ((LLMProvider) -> Void)?
 
     private var adapter: any ProviderAdapter
     private let consoleLogHandler: ConsoleLogHandler
     private let conversationStateHandler: ConversationStateHandler
+    private let privateChatStateHandler: PrivateChatStateHandler
     private var backObserver: NSKeyValueObservation?
     private var forwardObserver: NSKeyValueObservation?
     private var urlObserver: NSKeyValueObservation?
@@ -92,19 +111,23 @@ final class WebViewModel {
         let selectedAdapter = ProviderAdapters.adapter(for: selectedProvider)
         let consoleHandler = ConsoleLogHandler()
         let conversationHandler = ConversationStateHandler()
+        let privateChatHandler = PrivateChatStateHandler()
 
         provider = selectedProvider
         adapter = selectedAdapter
         consoleLogHandler = consoleHandler
         conversationStateHandler = conversationHandler
+        privateChatStateHandler = privateChatHandler
         wkWebView = Self.makeFullWebView(
             provider: selectedProvider,
             adapter: selectedAdapter,
             consoleLogHandler: consoleHandler,
-            conversationStateHandler: conversationHandler
+            conversationStateHandler: conversationHandler,
+            privateChatStateHandler: privateChatHandler
         )
 
         conversationStateHandler.model = self
+        privateChatStateHandler.model = self
         UserDefaults.standard.set(selectedProvider.rawValue, forKey: LLMProvider.defaultsKey)
         setupObservers()
         loadHome()
@@ -142,11 +165,13 @@ final class WebViewModel {
         UserDefaults.standard.set(newProvider.rawValue, forKey: LLMProvider.defaultsKey)
         isSuspended = false
         resetNavigationState(loading: true)
+        onProviderChanged?(newProvider)
         wkWebView = Self.makeFullWebView(
             provider: newProvider,
             adapter: adapter,
             consoleLogHandler: consoleLogHandler,
-            conversationStateHandler: conversationStateHandler
+            conversationStateHandler: conversationStateHandler,
+            privateChatStateHandler: privateChatStateHandler
         )
         setupObservers()
         notifyHostsOfWebViewChange()
@@ -185,6 +210,7 @@ final class WebViewModel {
         isAtHome = true
         canGoBack = false
         isInConversation = false
+        handlePrivateChatState(false)
         wkWebView.load(URLRequest(url: adapter.homeURL))
     }
 
@@ -216,12 +242,19 @@ final class WebViewModel {
     func openNewChat() {
         resumeIfSuspended()
         pendingPrivateChatProvider = nil
-        adapter.openNewChat(in: wkWebView)
+        let wasInPrivateChat = isInPrivateChat
+        handlePrivateChatState(false)
+        if wasInPrivateChat {
+            adapter.exitPrivateChat(in: wkWebView)
+        } else {
+            adapter.openNewChat(in: wkWebView)
+        }
     }
 
     func openPrivateChat() {
         resumeIfSuspended()
         guard capabilities.contains(.privateChat) else { return }
+        guard !isInPrivateChat else { return }
 
         if adapter.privateChatStartsAtHome {
             if let url = wkWebView.url,
@@ -254,12 +287,14 @@ final class WebViewModel {
     func loadProjects() {
         resumeIfSuspended()
         guard capabilities.contains(.projects), let url = adapter.projectsURL() else { return }
+        handlePrivateChatState(false)
         wkWebView.load(URLRequest(url: url))
     }
 
     func loadClaudeCode() {
         resumeIfSuspended()
         guard capabilities.contains(.claudeCode), let url = adapter.codeURL() else { return }
+        handlePrivateChatState(false)
         wkWebView.load(URLRequest(url: url))
     }
 
@@ -318,6 +353,12 @@ final class WebViewModel {
         if !wasInConversation && inConversation {
             onConversationStarted?()
         }
+    }
+
+    func handlePrivateChatState(_ inPrivateChat: Bool) {
+        guard isInPrivateChat != inPrivateChat else { return }
+        isInPrivateChat = inPrivateChat
+        onPrivateChatStateChanged?(inPrivateChat)
     }
 
     // MARK: - Inactivity suspension
@@ -393,7 +434,8 @@ final class WebViewModel {
             provider: provider,
             adapter: adapter,
             consoleLogHandler: consoleLogHandler,
-            conversationStateHandler: conversationStateHandler
+            conversationStateHandler: conversationStateHandler,
+            privateChatStateHandler: privateChatStateHandler
         )
         setupObservers()
         wkWebView.load(URLRequest(url: restoredURL))
@@ -437,7 +479,8 @@ final class WebViewModel {
             provider: provider,
             adapter: adapter,
             consoleLogHandler: consoleLogHandler,
-            conversationStateHandler: conversationStateHandler
+            conversationStateHandler: conversationStateHandler,
+            privateChatStateHandler: privateChatStateHandler
         )
         setupObservers()
         notifyHostsOfWebViewChange()
@@ -462,6 +505,7 @@ final class WebViewModel {
         isAtHome = true
         isLoading = loading
         isInConversation = false
+        handlePrivateChatState(false)
     }
 
     private func detachAndStop(_ webView: WKWebView) {
@@ -471,6 +515,7 @@ final class WebViewModel {
         webView.uiDelegate = nil
         let controller = webView.configuration.userContentController
         controller.removeScriptMessageHandler(forName: UserScripts.conversationStateHandler)
+        controller.removeScriptMessageHandler(forName: UserScripts.privateChatStateHandler)
         #if DEBUG
         controller.removeScriptMessageHandler(forName: UserScripts.consoleLogHandler)
         #endif
@@ -481,7 +526,8 @@ final class WebViewModel {
         provider: LLMProvider,
         adapter: any ProviderAdapter,
         consoleLogHandler: ConsoleLogHandler,
-        conversationStateHandler: ConversationStateHandler
+        conversationStateHandler: ConversationStateHandler,
+        privateChatStateHandler: PrivateChatStateHandler
     ) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = websiteDataStore(for: provider)
@@ -495,6 +541,10 @@ final class WebViewModel {
         configuration.userContentController.add(
             conversationStateHandler,
             name: UserScripts.conversationStateHandler
+        )
+        configuration.userContentController.add(
+            privateChatStateHandler,
+            name: UserScripts.privateChatStateHandler
         )
         #if DEBUG
         configuration.userContentController.add(
