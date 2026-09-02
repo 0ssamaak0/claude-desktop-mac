@@ -399,3 +399,44 @@ final class ProviderRoutingTests: XCTestCase {
         try XCTUnwrap(URL(string: string))
     }
 }
+
+final class PageZoomTests: XCTestCase {
+    func testLadderIsStrictlyAscendingAndAnchored() {
+        XCTAssertEqual(PageZoom.ladder, PageZoom.ladder.sorted())
+        XCTAssertEqual(Set(PageZoom.ladder).count, PageZoom.ladder.count)
+        XCTAssertTrue(PageZoom.ladder.contains(PageZoom.defaultZoom))
+        XCTAssertEqual(PageZoom.minimum, 0.5)
+        XCTAssertEqual(PageZoom.maximum, 2.0)
+    }
+
+    func testStepsWalkAdjacentStopsAndClampAtTheEnds() {
+        for (below, above) in zip(PageZoom.ladder, PageZoom.ladder.dropFirst()) {
+            XCTAssertEqual(PageZoom.stepUp(from: below), above)
+            XCTAssertEqual(PageZoom.stepDown(from: above), below)
+        }
+        XCTAssertEqual(PageZoom.stepUp(from: PageZoom.maximum), PageZoom.maximum)
+        XCTAssertEqual(PageZoom.stepDown(from: PageZoom.minimum), PageZoom.minimum)
+    }
+
+    func testStepsFromOffLadderValuesReachTheSurroundingStops() {
+        XCTAssertEqual(PageZoom.stepUp(from: 0.97), 1.0)
+        XCTAssertEqual(PageZoom.stepDown(from: 0.97), 0.85)
+    }
+
+    func testNearestSnapsLegacyAndOutOfRangeValues() {
+        XCTAssertEqual(PageZoom.nearest(to: 0), 1.0)
+        XCTAssertEqual(PageZoom.nearest(to: -1), 1.0)
+        XCTAssertEqual(PageZoom.nearest(to: 0.97), 1.0)
+        XCTAssertEqual(PageZoom.nearest(to: 0.6), 0.5)
+        XCTAssertEqual(PageZoom.nearest(to: 1.4), 1.5)
+        XCTAssertEqual(PageZoom.nearest(to: 3.7), 2.0)
+        // Equidistant between 1.15 and 1.25 resolves to the smaller stop.
+        XCTAssertEqual(PageZoom.nearest(to: 1.2), 1.15)
+    }
+
+    func testNearestIsIdempotentOnEveryStop() {
+        for stop in PageZoom.ladder {
+            XCTAssertEqual(PageZoom.nearest(to: stop), stop)
+        }
+    }
+}

@@ -55,6 +55,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				"NSScreen+Extensions.swift",
+				PageZoom.swift,
 				SelectionCapture.swift,
 				UserDefaultsKeys.swift,
 			);

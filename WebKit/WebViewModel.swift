@@ -54,10 +54,6 @@ final class PrivateChatStateHandler: NSObject, WKScriptMessageHandler {
 /// WKWebView or WebContent process.
 @Observable
 final class WebViewModel {
-    static let defaultPageZoom: Double = 1.0
-
-    private static let minZoom: Double = 0.6
-    private static let maxZoom: Double = 1.4
     private static let inactivityTimeout: TimeInterval = 10 * 60
 
     /// Stable identity for the provider's persistent WebKit store. Internal so
@@ -467,24 +463,24 @@ final class WebViewModel {
 
     func zoomIn() {
         resumeIfSuspended()
-        let zoom = min((wkWebView.pageZoom * 100 + 1).rounded() / 100, Self.maxZoom)
-        setZoom(zoom)
+        setZoom(PageZoom.stepUp(from: wkWebView.pageZoom))
     }
 
     func zoomOut() {
         resumeIfSuspended()
-        let zoom = max((wkWebView.pageZoom * 100 - 1).rounded() / 100, Self.minZoom)
-        setZoom(zoom)
+        setZoom(PageZoom.stepDown(from: wkWebView.pageZoom))
     }
 
     func resetZoom() {
         resumeIfSuspended()
-        setZoom(Self.defaultPageZoom)
+        setZoom(PageZoom.defaultZoom)
     }
 
-    private func setZoom(_ zoom: Double) {
-        wkWebView.pageZoom = zoom
-        UserDefaults.standard.set(zoom, forKey: UserDefaultsKeys.pageZoom.rawValue)
+    /// The one write path for zoom: snaps to the ladder, applies, persists.
+    func setZoom(_ zoom: Double) {
+        let snapped = PageZoom.nearest(to: zoom)
+        wkWebView.pageZoom = snapped
+        UserDefaults.standard.set(snapped, forKey: UserDefaultsKeys.pageZoom.rawValue)
     }
 
     // MARK: - WebView lifecycle
@@ -580,7 +576,7 @@ final class WebViewModel {
         webView.allowsMagnification = true
 
         let savedZoom = UserDefaults.standard.double(forKey: UserDefaultsKeys.pageZoom.rawValue)
-        webView.pageZoom = savedZoom > 0 ? savedZoom : defaultPageZoom
+        webView.pageZoom = PageZoom.nearest(to: savedZoom)
         return webView
     }
 

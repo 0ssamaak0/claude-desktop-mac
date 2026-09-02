@@ -35,6 +35,9 @@ struct AIChatApp: App {
     /// replacing, so a second registration would fire the handler twice.
     @MainActor private static var didRegisterHotKey = false
 
+    @AppStorage(UserDefaultsKeys.showMenuBarIcon.rawValue)
+    private var showMenuBarIcon = true
+
     var body: some Scene {
         Window(AppCoordinator.Constants.mainWindowTitle, id: Constants.mainWindowID) {
             MainWindowView(coordinator: coordinator)
@@ -192,24 +195,25 @@ struct AIChatApp: App {
         Settings {
             SettingsView(coordinator: coordinator)
         }
+        .windowResizability(.contentSize)
         .defaultSize(
-            width: Constants.settingsWindowDefaultWidth,
-            height: Constants.settingsWindowDefaultHeight
+            width: SettingsLayout.width,
+            height: SettingsLayout.defaultHeight
         )
 
-        MenuBarExtra {
+        MenuBarExtra(isInserted: $showMenuBarIcon) {
             MenuBarView(coordinator: coordinator)
         } label: {
             Image(Constants.menuBarIcon)
                 .renderingMode(.template)
-                .onAppear(perform: configureLaunchVisibility)
         }
         .menuBarExtraStyle(.menu)
     }
 
     init() {
-        // The theme is applied in `configureLaunchVisibility`, not here:
-        // `NSApp` does not exist yet when SwiftUI initializes this value.
+        // The theme is applied in `AppDelegate.applicationDidFinishLaunching`,
+        // not here: `NSApp` does not exist yet when SwiftUI initializes this
+        // value.
         SelectionCaptureService.shared.syncWithPreference()
 
         if !Self.didRegisterHotKey {
@@ -220,31 +224,6 @@ struct AIChatApp: App {
         }
     }
 
-    private func configureLaunchVisibility() {
-        AppTheme.current.apply()
-
-        let defaults = UserDefaults.standard
-        let hideWindowAtLaunch = defaults.bool(
-            forKey: UserDefaultsKeys.hideWindowAtLaunch.rawValue
-        )
-        let hideDockIcon = defaults.bool(forKey: UserDefaultsKeys.hideDockIcon.rawValue)
-
-        guard hideDockIcon || hideWindowAtLaunch else {
-            NSApp.setActivationPolicy(.regular)
-            return
-        }
-
-        NSApp.setActivationPolicy(.accessory)
-        guard hideWindowAtLaunch else { return }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + Constants.hideWindowDelay) {
-            for window in NSApp.windows where
-                window.identifier?.rawValue == Constants.mainWindowID ||
-                window.title == AppCoordinator.Constants.mainWindowTitle {
-                window.orderOut(nil)
-            }
-        }
-    }
 }
 
 // MARK: - Constants
@@ -255,9 +234,6 @@ extension AIChatApp {
         static let mainWindowMinHeight: CGFloat = 300
         static let mainWindowDefaultWidth: CGFloat = 1000
         static let mainWindowDefaultHeight: CGFloat = 700
-
-        static let settingsWindowDefaultWidth: CGFloat = 700
-        static let settingsWindowDefaultHeight: CGFloat = 600
 
         static let mainWindowID = "main"
         /// Template image set in the asset catalog, not an SF Symbol: the mark

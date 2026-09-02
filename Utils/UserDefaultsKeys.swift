@@ -22,6 +22,8 @@ enum UserDefaultsKeys: String {
     case panelY
     case alwaysOnTop
     case captureSelectedText
+    /// Stored positively; a missing key means the icon is shown.
+    case showMenuBarIcon
 }
 
 enum AppTheme: String, CaseIterable {

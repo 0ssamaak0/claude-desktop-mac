@@ -158,6 +158,9 @@ final class AppCoordinator {
     func zoomIn() { webViewModel.zoomIn() }
     func zoomOut() { webViewModel.zoomOut() }
     func resetZoom() { webViewModel.resetZoom() }
+    /// Settings write path. Deliberately does not resume a suspended session;
+    /// the persisted value is applied when the web view is rebuilt.
+    func setPageZoom(_ zoom: Double) { webViewModel.setZoom(zoom) }
 
     // MARK: - Always on Top
 
