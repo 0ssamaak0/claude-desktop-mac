@@ -38,10 +38,9 @@ struct PrivacySettingsSections: View {
 
     private func clearWebsiteData() {
         isClearing = true
+        // clearAllWebsiteData completes via group.notify(queue: .main).
         coordinator.webViewModel.clearAllWebsiteData {
-            DispatchQueue.main.async {
-                isClearing = false
-            }
+            isClearing = false
         }
     }
 }

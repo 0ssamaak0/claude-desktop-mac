@@ -23,7 +23,7 @@ struct ProviderCapabilities: OptionSet, Sendable {
 }
 
 /// A stable provider identity used by settings and provider-specific WebKit data stores.
-enum LLMProvider: String, CaseIterable, Identifiable, Codable, Sendable {
+enum LLMProvider: String, CaseIterable, Identifiable, Sendable {
     case claude
     case gemini
     case chatgpt

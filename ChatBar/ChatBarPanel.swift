@@ -127,13 +127,6 @@ final class ChatBarPanel: NSPanel, NSWindowDelegate {
                 isPrivateChat: isActive
             )
         }
-        webViewModel.onProviderChanged = { [weak self] provider in
-            guard let self, let webViewModel = self.webViewModel else { return }
-            self.updateChatAppearance(
-                provider: provider,
-                isPrivateChat: webViewModel.isInPrivateChat
-            )
-        }
     }
 
     deinit {
@@ -150,6 +143,10 @@ final class ChatBarPanel: NSPanel, NSWindowDelegate {
         level = .floating
         isMovable = true
         isMovableByWindowBackground = false
+        // The coordinator owns this panel strongly and calls close() to release
+        // it on idle; the NSWindow default of true would make that close an
+        // over-release on an ARC-held property.
+        isReleasedWhenClosed = false
         collectionBehavior.formUnion([.fullScreenAuxiliary, .canJoinAllSpaces])
         minSize = Self.panelSize(
             forContentSize: NSSize(
@@ -209,6 +206,52 @@ final class ChatBarPanel: NSPanel, NSWindowDelegate {
         presentationFrame = frame
     }
 
+    /// Places the panel for the configured `PanelPosition`. Called after
+    /// `prepareForPresentation()`, which settles the size that `contentBoxSize`
+    /// derives from — the order is load-bearing. Deliberately not folded into
+    /// `prepareForPresentation`: its `isProgrammaticTransition` guard must not
+    /// gate positioning, or a show arriving during an expand/dismiss animation
+    /// would silently skip it.
+    ///
+    /// `force` is the "panel was just created" case (and the Settings reset),
+    /// which must reposition even when the user chose Remember Last.
+    func positionForPresentation(force: Bool) {
+        let position = PanelPosition.current
+        guard force || (!isVisible && position != .rememberLast) else { return }
+        // The screen guard sits before the Remember Last branch on purpose: a
+        // no-screen state skips the saved-origin restore too, exactly as the
+        // coordinator's placement always has.
+        guard let screen = NSScreen.screenAtMouseLocation() ?? NSScreen.main else {
+            return
+        }
+
+        if position == .rememberLast {
+            let defaults = UserDefaults.standard
+            if defaults.object(forKey: UserDefaultsKeys.panelX.rawValue) != nil,
+               defaults.object(forKey: UserDefaultsKeys.panelY.rawValue) != nil {
+                let saved = NSPoint(
+                    x: defaults.double(forKey: UserDefaultsKeys.panelX.rawValue),
+                    y: defaults.double(forKey: UserDefaultsKeys.panelY.rawValue)
+                )
+                let center = NSPoint(
+                    x: saved.x + contentBoxSize.width / 2,
+                    y: saved.y + contentBoxSize.height / 2
+                )
+                if NSScreen.screenStrictly(containing: center) != nil {
+                    setPresentationContentOrigin(saved)
+                    return
+                }
+            }
+        }
+
+        let origin = screen.point(
+            for: contentBoxSize,
+            position: position,
+            dockOffset: Constants.dockOffset
+        )
+        setPresentationContentOrigin(origin)
+    }
+
     /// Deferring focus by one run-loop turn gives BrowserWebView time to attach
     /// the shared WKWebView after the destination window becomes key.
     func focusComposer() {
@@ -219,7 +262,11 @@ final class ChatBarPanel: NSPanel, NSWindowDelegate {
 
     /// Positions the inner app at the requested origin. The glass rim extends
     /// outward from that content box and does not change its saved placement.
-    func setPresentationContentOrigin(_ origin: NSPoint) {
+    /// Every programmatic move must route through here, never a raw
+    /// `setFrameOrigin`: cancelling `positionSaveWork` and bracketing the move
+    /// in `isProgrammaticTransition` is what stops `windowDidMove` from
+    /// re-persisting the origin.
+    private func setPresentationContentOrigin(_ origin: NSPoint) {
         positionSaveWork?.cancel()
         isProgrammaticTransition = true
         setFrameOrigin(Self.panelOrigin(forContentOrigin: origin))
@@ -228,12 +275,53 @@ final class ChatBarPanel: NSPanel, NSWindowDelegate {
     }
 
     /// The web app's dimensions, excluding the Liquid Glass chrome.
-    var contentBoxSize: NSSize {
+    private var contentBoxSize: NSSize {
         Self.contentSize(forPanelSize: frame.size)
     }
 
     var shouldDismissOnToggle: Bool {
         presentationState == .showing || presentationState == .visible
+    }
+
+    /// True only when the user has already dismissed the panel. Suspension can
+    /// fire while a presented panel is merely occluded (display sleep, screen
+    /// lock, ⌘H); releasing it then would make the user's open panel vanish.
+    var isReleasableWhenIdle: Bool {
+        presentationState == .hidden && !isVisible
+    }
+
+    /// Flushes state that lives only in the live NSPanel before the coordinator
+    /// drops it: a width chosen while expanded is committed by the collapse
+    /// (hidden window, so nothing visibly animates), and any debounced
+    /// geometry save — which `deinit` would cancel — is written out now.
+    func prepareForIdleRelease() {
+        removeClickOutsideMonitor()
+        if isExpanded { resetToInitialSize() }
+        positionSaveWork?.cancel()
+        positionSaveWork = nil
+        sizeSaveWork?.cancel()
+        sizeSaveWork = nil
+
+        let size = contentBoxSize
+        UserDefaults.standard.set(
+            size.width,
+            forKey: UserDefaultsKeys.panelWidth.rawValue
+        )
+        UserDefaults.standard.set(
+            size.height,
+            forKey: UserDefaultsKeys.panelHeight.rawValue
+        )
+        if PanelPosition.current == .rememberLast {
+            let origin = Self.contentOrigin(forPanelOrigin: frame.origin)
+            UserDefaults.standard.set(
+                origin.x,
+                forKey: UserDefaultsKeys.panelX.rawValue
+            )
+            UserDefaults.standard.set(
+                origin.y,
+                forKey: UserDefaultsKeys.panelY.rawValue
+            )
+        }
     }
 
     func presentAnimated() {
@@ -364,7 +452,17 @@ final class ChatBarPanel: NSPanel, NSWindowDelegate {
     }
 
     /// A provider switch always opens the new provider's home page.
+    ///
+    /// The tint update must stay the first statement: `resetToInitialSize`
+    /// ends in `setFrame(display: true)`, the only forced display in the
+    /// sequence, and tinting after it could paint one stale-colour frame.
     func providerDidSwitch() {
+        if let webViewModel {
+            updateChatAppearance(
+                provider: webViewModel.provider,
+                isPrivateChat: webViewModel.isInPrivateChat
+            )
+        }
         resetToInitialSize()
         if isVisible {
             DispatchQueue.main.async { [weak self] in
@@ -569,6 +667,8 @@ final class ChatBarPanel: NSPanel, NSWindowDelegate {
 
 extension ChatBarPanel {
     struct Constants {
+        /// Vertical inset above the Dock for the bottom panel positions.
+        static let dockOffset: CGFloat = 50
         static let defaultWidth: CGFloat = 500
         static let defaultHeight: CGFloat = 200
         static let minWidth: CGFloat = 300

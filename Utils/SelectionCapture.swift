@@ -111,8 +111,12 @@ final class SelectionCaptureService {
     /// This must run before the Chat Bar is presented. Deferring it to a
     /// background queue loses the race against the panel taking focus, and the
     /// system-wide focused element then reports Thinspace's own composer instead
-    /// of the source app's selection. The messaging timeout bounds the cost of
-    /// an unresponsive source app to a brief delay before the panel appears.
+    /// of the source app's selection. The messaging timeout bounds each
+    /// Accessibility call, and an unresponsive source app costs about three
+    /// timeouts in total because every walk short-circuits on its first failed
+    /// fetch. What no per-call timeout bounds is a responsive-but-slow app
+    /// answering several hundred reads, which is why the walks below are
+    /// deduplicated and batched.
     ///
     /// Returns `nil` when the feature is off, permission is missing, nothing is
     /// selected, or the source app does not expose its selection.
@@ -167,10 +171,14 @@ private enum AccessibilityReader {
         excludingPID ownPID: pid_t,
         fallback: (pid: pid_t, name: String)?
     ) -> CapturedSelection? {
-        if let focused = systemWideFocusedElement(),
-           pid(of: focused) != ownPID,
-           let selection = selection(from: focused) {
-            return selection
+        // Assigned in exactly one place: after the pid check, when the walk
+        // below actually runs. It is what lets the fallback path skip
+        // re-walking the identical element — usually the same ~39 blocking
+        // reads for the same nil answer.
+        var walked: AXUIElement?
+        if let focused = systemWideFocusedElement(), pid(of: focused) != ownPID {
+            walked = focused
+            if let selection = selection(from: focused) { return selection }
         }
 
         guard let fallback, fallback.pid != ownPID else { return nil }
@@ -178,6 +186,7 @@ private enum AccessibilityReader {
         _ = AXUIElementSetMessagingTimeout(application, messagingTimeout)
 
         if let focused = element(application, kAXFocusedUIElementAttribute),
+           !(walked.map { CFEqual($0, focused) } ?? false),
            let selection = selection(from: focused, appName: fallback.name) {
             return selection
         }
@@ -245,13 +254,24 @@ private enum AccessibilityReader {
 
     /// WebKit hosts report the selection on the enclosing web area rather than
     /// on whichever node holds focus, so an empty answer is retried up the
-    /// parent chain before giving up.
+    /// parent chain before giving up. The three attributes each hop needs are
+    /// fetched in one round trip instead of two or three.
     private static func selectedText(startingAt element: AXUIElement) -> String? {
         var current = element
         for _ in 0...maximumParentHops {
-            if let text = selectedText(of: current) { return text }
-            guard let parent = self.element(current, kAXParentAttribute) else { break }
-            current = parent
+            let values = multipleValues(current, [
+                kAXSelectedTextAttribute,
+                "AXSelectedTextMarkerRange",
+                kAXParentAttribute
+            ])
+            if let text = nonEmpty(values[0] as? String) { return text }
+            if let range = values[1],
+               let text = stringForTextMarkerRange(range, of: current) {
+                return text
+            }
+            guard let parentRef = values[2],
+                  CFGetTypeID(parentRef) == AXUIElementGetTypeID() else { break }
+            current = (parentRef as! AXUIElement)
         }
         return nil
     }
@@ -264,6 +284,13 @@ private enum AccessibilityReader {
         if let text = nonEmpty(string(element, kAXSelectedTextAttribute)) { return text }
 
         guard let range = value(element, "AXSelectedTextMarkerRange") else { return nil }
+        return stringForTextMarkerRange(range, of: element)
+    }
+
+    private static func stringForTextMarkerRange(
+        _ range: CFTypeRef,
+        of element: AXUIElement
+    ) -> String? {
         var result: CFTypeRef?
         guard AXUIElementCopyParameterizedAttributeValue(
             element,
@@ -344,6 +371,34 @@ private enum AccessibilityReader {
 
     private static func string(_ element: AXUIElement, _ attribute: String) -> String? {
         value(element, attribute) as? String
+    }
+
+    /// One round trip for several attributes. A failed attribute comes back as
+    /// an AXValue error placeholder; those map to nil so callers see exactly
+    /// what the single-attribute helpers would have returned.
+    private static func multipleValues(
+        _ element: AXUIElement,
+        _ attributes: [String]
+    ) -> [CFTypeRef?] {
+        var raw: CFArray?
+        guard AXUIElementCopyMultipleAttributeValues(
+            element,
+            attributes as CFArray,
+            AXCopyMultipleAttributeOptions(),
+            &raw
+        ) == .success,
+              let values = raw as [AnyObject]?,
+              values.count == attributes.count else {
+            return [CFTypeRef?](repeating: nil, count: attributes.count)
+        }
+        return values.map { entry in
+            let ref = entry as CFTypeRef
+            if CFGetTypeID(ref) == AXValueGetTypeID(),
+               AXValueGetType((ref as! AXValue)) == .axError {
+                return nil
+            }
+            return ref
+        }
     }
 
     private static func children(_ element: AXUIElement) -> [AXUIElement] {

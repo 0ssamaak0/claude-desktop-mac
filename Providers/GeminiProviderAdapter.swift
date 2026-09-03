@@ -34,13 +34,6 @@ struct GeminiProviderAdapter: ProviderAdapter {
         return .other
     }
 
-    func openNewChat(in webView: WKWebView) {
-        dispatchKeyboardShortcut(
-            key: "o", code: "KeyO", keyCode: 79, shift: true,
-            privateChatState: false, in: webView
-        )
-    }
-
     func activatePrivateChat(in webView: WKWebView) {
         let source = """
         (function() {
@@ -59,11 +52,7 @@ struct GeminiProviderAdapter: ProviderAdapter {
             let sidebarWasOpened = false;
             let tries = 0;
 
-            function visible(element) {
-                return !!element && getComputedStyle(element).display !== 'none' &&
-                    getComputedStyle(element).visibility !== 'hidden' &&
-                    element.getClientRects().length > 0;
-            }
+            \(ProviderJS.visible)
             function first(selectors) {
                 for (const selector of selectors) {
                     try {
@@ -111,29 +100,23 @@ struct GeminiProviderAdapter: ProviderAdapter {
     }
 
     func toggleSidebar(in webView: WKWebView) {
-        let source = """
-        (function() {
-            const selectors = [
-                'button[aria-label*="Main menu" i]',
-                'button[aria-label*="Open sidebar" i]',
-                'button[aria-label*="Close sidebar" i]',
-                'button[aria-label*="sidebar" i]',
-                'button[data-test-id="side-nav-toggle"]'
-            ];
-            let tries = 0;
-            function attempt() {
-                for (const selector of selectors) {
-                    const button = document.querySelector(selector);
-                    if (button) { button.click(); return; }
-                }
-                if (++tries < 40) setTimeout(attempt, 75);
-            }
-            attempt();
-            return true;
-        })();
-        """
+        let source = retryingActionScript(
+            selectors: [
+                "button[aria-label*=\"Main menu\" i]",
+                "button[aria-label*=\"Open sidebar\" i]",
+                "button[aria-label*=\"Close sidebar\" i]",
+                "button[aria-label*=\"sidebar\" i]",
+                "button[data-test-id=\"side-nav-toggle\"]"
+            ],
+            action: .click
+        )
         runJavaScript(source, named: "toggle sidebar", in: webView)
     }
+
+    // focusComposer stays on its hand-written `||` chain deliberately: the
+    // first branch scopes the contenteditable search to the matched
+    // rich-textarea, which an array of flat selectors cannot express without
+    // changing which element wins when two rich-textareas exist.
 
     func focusComposer(in webView: WKWebView) {
         let source = """

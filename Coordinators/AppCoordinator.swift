@@ -31,6 +31,11 @@ final class AppCoordinator {
     private var pendingWindowAttachAction: ((NSWindow) -> Void)?
 
     let webViewModel = WebViewModel()
+    /// Assigned from both MainWindowView and MenuBarView onAppear; last writer
+    /// wins deliberately, since each captures `openWindow` from its own scene.
+    /// No view reads this, so it is untracked — a future body read would not
+    /// invalidate.
+    @ObservationIgnored
     var openWindowAction: ((String) -> Void)?
     var alwaysOnTop = UserDefaults.standard.bool(
         forKey: UserDefaultsKeys.alwaysOnTop.rawValue
@@ -51,6 +56,9 @@ final class AppCoordinator {
                 self?.openMainWindow()
             }
         }
+        webViewModel.onDidSuspend = { [weak self] in
+            self?.releaseChatBarIfIdle()
+        }
     }
 
     deinit {
@@ -66,6 +74,8 @@ final class AppCoordinator {
 
         webViewModel.switchProvider(to: provider)
         rebuildMainToolbar()
+        // providerDidSwitch() is what repaints the Chat Bar tint; it must
+        // accompany every webViewModel.switchProvider(to:) call.
         chatBar?.providerDidSwitch()
     }
 
@@ -95,7 +105,7 @@ final class AppCoordinator {
 
     /// Focuses the search field embedded in the toolbar, when present.
     func focusToolbarSearch() {
-        guard let toolbar = findMainWindow()?.toolbar,
+        guard let toolbar = Self.mainWindow()?.toolbar,
               let searchItem = toolbar.items.first(where: {
                   $0.itemIdentifier == .aiSearch
               }) as? NSSearchToolbarItem else {
@@ -149,7 +159,7 @@ final class AppCoordinator {
     }
 
     private func rebuildMainToolbar() {
-        guard let window = findMainWindow() else { return }
+        guard let window = Self.mainWindow() else { return }
         attachMainToolbar(to: window)
     }
 
@@ -174,7 +184,7 @@ final class AppCoordinator {
     }
 
     func applyAlwaysOnTop() {
-        findMainWindow()?.level = alwaysOnTop ? .floating : .normal
+        Self.mainWindow()?.level = alwaysOnTop ? .floating : .normal
         // The Chat Bar is always floating by design.
     }
 
@@ -225,57 +235,37 @@ final class AppCoordinator {
         let wasCreated = chatBar == nil
         let bar = ensureChatBar()
         bar.prepareForPresentation()
-
-        let position = PanelPosition.current
-        if wasCreated || (!bar.isVisible && position != .rememberLast) {
-            positionChatBar(bar, position: position)
-        }
+        bar.positionForPresentation(force: wasCreated)
         return bar
     }
 
-    private func positionChatBar(_ bar: ChatBarPanel, position: PanelPosition) {
-        guard let screen = NSScreen.screenAtMouseLocation() ?? NSScreen.main else {
-            return
-        }
-
-        if position == .rememberLast {
-            let defaults = UserDefaults.standard
-            if defaults.object(forKey: UserDefaultsKeys.panelX.rawValue) != nil,
-               defaults.object(forKey: UserDefaultsKeys.panelY.rawValue) != nil {
-                let saved = NSPoint(
-                    x: defaults.double(forKey: UserDefaultsKeys.panelX.rawValue),
-                    y: defaults.double(forKey: UserDefaultsKeys.panelY.rawValue)
-                )
-                let center = NSPoint(
-                    x: saved.x + bar.contentBoxSize.width / 2,
-                    y: saved.y + bar.contentBoxSize.height / 2
-                )
-                if NSScreen.screenStrictly(containing: center) != nil {
-                    bar.setPresentationContentOrigin(saved)
-                    return
-                }
-            }
-        }
-
-        let origin = screen.point(
-            for: bar.contentBoxSize,
-            position: position,
-            dockOffset: Constants.dockOffset
-        )
-        bar.setPresentationContentOrigin(origin)
-    }
-
     func resetChatBarPosition() {
-        guard let chatBar else { return }
-        positionChatBar(chatBar, position: PanelPosition.current)
+        chatBar?.positionForPresentation(force: true)
     }
 
     func hideChatBar() {
         chatBar?.dismissAnimated()
     }
 
+    /// The panel and its whole hosting stack are only worth their memory while
+    /// the session is live; once it suspends, a dismissed panel is released
+    /// and rebuilt — indistinguishably — on the next summon. A panel the user
+    /// has not dismissed is left alone and retried on the next suspension.
+    private func releaseChatBarIfIdle() {
+        guard let bar = chatBar, bar.isReleasableWhenIdle else { return }
+        bar.prepareForIdleRelease()
+        bar.delegate = nil
+        // Without close() the panel stays in NSApp's window list and nothing
+        // is reclaimed. applicationShouldTerminateAfterLastWindowClosed
+        // returns false, so this cannot terminate the app.
+        bar.close()
+        chatBar = nil
+        webViewModel.onConversationStarted = nil
+        webViewModel.onPrivateChatStateChanged = nil
+    }
+
     func closeMainWindow() {
-        findMainWindow()?.orderOut(nil)
+        Self.mainWindow()?.orderOut(nil)
     }
 
     func toggleChatBar() {
@@ -306,7 +296,7 @@ final class AppCoordinator {
             NSApp.setActivationPolicy(.regular)
         }
 
-        if let window = findMainWindow() {
+        if let window = Self.mainWindow() {
             if let targetScreen {
                 centerWindow(window, on: targetScreen)
             }
@@ -326,7 +316,7 @@ final class AppCoordinator {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func findMainWindow() -> NSWindow? {
+    static func mainWindow() -> NSWindow? {
         NSApp.windows.first {
             ($0.identifier?.rawValue == Constants.mainWindowIdentifier ||
              $0.title == Constants.mainWindowTitle) && !($0 is NSPanel)
@@ -341,7 +331,9 @@ final class AppCoordinator {
 
 extension AppCoordinator {
     struct Constants {
-        static let dockOffset: CGFloat = 50
+        /// The SwiftUI scene id of the main window. Both `openWindow(id:)` and
+        /// the `mainWindow()` lookup key on this one value — they must agree,
+        /// or "open main window" from the menu bar silently stops working.
         static let mainWindowIdentifier = "main"
         static let mainWindowTitle = "Thinspace"
     }

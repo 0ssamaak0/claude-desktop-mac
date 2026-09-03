@@ -11,7 +11,7 @@ import WebKit
 import XCTest
 @testable import Thinspace
 
-private final class RecordingWebView: WKWebView {
+private class RecordingWebView: WKWebView {
     private(set) var evaluatedScripts: [String] = []
     private(set) var loadedRequests: [URLRequest] = []
 
@@ -27,6 +27,12 @@ private final class RecordingWebView: WKWebView {
         loadedRequests.append(request)
         return nil
     }
+}
+
+/// Reports a claude.ai/code URL so adapter actions that branch on the current
+/// page exercise their Code-page path.
+private final class CodePageWebView: RecordingWebView {
+    override var url: URL? { URL(string: "https://claude.ai/code") }
 }
 
 final class LLMProviderTests: XCTestCase {
@@ -115,6 +121,15 @@ final class LLMProviderTests: XCTestCase {
 }
 
 final class ChatBarPresentationTests: XCTestCase {
+    @MainActor
+    func testHidingMainWindowDoesNotTerminateChatBarApp() {
+        XCTAssertFalse(
+            AppDelegate().applicationShouldTerminateAfterLastWindowClosed(
+                NSApplication.shared
+            )
+        )
+    }
+
     func testGlassChromeAndSwipeAnimationsStayRestrained() {
         XCTAssertEqual(ChatBarPanel.Constants.glassRimWidth, 10)
         XCTAssertEqual(ChatBarPanel.Constants.chromeExpansion, 20)
@@ -211,6 +226,74 @@ final class ProviderUserScriptTests: XCTestCase {
         }
     }
 
+    /// The conversation observer and the activation scripts interpolate shared
+    /// Swift-side JS snippets; a broken interpolation would kill the feature
+    /// silently, since WebKit drops an unparseable user script without error.
+    func testEveryProviderConversationObserverHasValidJavaScriptSyntax() throws {
+        let context = try XCTUnwrap(JSContext())
+
+        for provider in LLMProvider.allCases {
+            let adapter = ProviderAdapters.adapter(for: provider)
+            let source = try XCTUnwrap(
+                UserScripts.createAllScripts(for: adapter).first {
+                    $0.source.contains("__aiChatConversationObserverInstalled")
+                }?.source
+            )
+            XCTAssertTrue(
+                source.contains("new MutationObserver(onMutations)"),
+                provider.displayName
+            )
+
+            let encodedData = try JSONSerialization.data(
+                withJSONObject: source,
+                options: .fragmentsAllowed
+            )
+            let encodedSource = try XCTUnwrap(
+                String(data: encodedData, encoding: .utf8)
+            )
+            context.exception = nil
+            context.evaluateScript("new Function(\(encodedSource));")
+            XCTAssertNil(context.exception, provider.displayName)
+        }
+    }
+
+    func testEveryProviderPrivateChatActivationScriptHasValidJavaScriptSyntax() throws {
+        let context = try XCTUnwrap(JSContext())
+
+        for provider in LLMProvider.allCases {
+            let webView = RecordingWebView()
+            ProviderAdapters.adapter(for: provider).activatePrivateChat(in: webView)
+            let source = try XCTUnwrap(
+                webView.evaluatedScripts.last,
+                provider.displayName
+            )
+            XCTAssertTrue(
+                source.contains("function visible(element) {"),
+                provider.displayName
+            )
+
+            let encodedData = try JSONSerialization.data(
+                withJSONObject: source,
+                options: .fragmentsAllowed
+            )
+            let encodedSource = try XCTUnwrap(
+                String(data: encodedData, encoding: .utf8)
+            )
+            context.exception = nil
+            context.evaluateScript("new Function(\(encodedSource));")
+            XCTAssertNil(context.exception, provider.displayName)
+        }
+
+        // The whitespace regex is the classic escape casualty: one wrong
+        // backslash turns it into a literal-`s` match and every name
+        // comparison quietly breaks.
+        let chatGPT = RecordingWebView()
+        ChatGPTProviderAdapter().activatePrivateChat(in: chatGPT)
+        XCTAssertTrue(
+            chatGPT.evaluatedScripts.last?.contains(#"replace(/\s+/g, ' ')"#) == true
+        )
+    }
+
     func testEveryProviderNormalChatActionClearsPagePrivateState() {
         for provider in LLMProvider.allCases {
             let webView = RecordingWebView()
@@ -247,6 +330,123 @@ final class ProviderUserScriptTests: XCTestCase {
                 adapter.provider.displayName
             )
         }
+    }
+}
+
+/// Pins the JavaScript each provider action emits, byte for byte. The shared
+/// `retryingActionScript` generator replaced hand-copied literals; these
+/// goldens are what let that refactor prove it changed nothing.
+final class ProviderActionScriptTests: XCTestCase {
+    func testClaudeFocusComposerEmitsGoldenScript() {
+        let webView = RecordingWebView()
+        ClaudeProviderAdapter().focusComposer(in: webView)
+
+        XCTAssertEqual(webView.evaluatedScripts.last, #"""
+        (function() {
+            const selectors = [
+                "div.ProseMirror[contenteditable=\"true\"]",
+                "div[contenteditable=\"true\"][data-placeholder]",
+                "textarea[placeholder*=\"Message\" i]",
+                "textarea[placeholder*=\"Reply\" i]",
+                "[contenteditable=\"true\"]",
+                "textarea"
+            ];
+            let tries = 0;
+            function attempt() {
+                for (const selector of selectors) {
+                    const input = document.querySelector(selector);
+                    if (input) { input.focus(); return; }
+                }
+                if (++tries < 40) setTimeout(attempt, 75);
+            }
+            attempt();
+            return true;
+        })();
+        """#)
+    }
+
+    func testChatGPTFocusComposerEmitsGoldenScript() {
+        let webView = RecordingWebView()
+        ChatGPTProviderAdapter().focusComposer(in: webView)
+
+        XCTAssertEqual(webView.evaluatedScripts.last, #"""
+        (function() {
+            const selectors = [
+                "#prompt-textarea",
+                "[data-testid=\"composer-text-input\"]",
+                "div.ProseMirror[contenteditable=\"true\"]",
+                "div[contenteditable=\"true\"][data-placeholder]",
+                "textarea[placeholder*=\"Message\" i]",
+                "[contenteditable=\"true\"]",
+                "textarea"
+            ];
+            let tries = 0;
+            function attempt() {
+                for (const selector of selectors) {
+                    const input = document.querySelector(selector);
+                    if (input) { input.focus(); return; }
+                }
+                if (++tries < 40) setTimeout(attempt, 75);
+            }
+            attempt();
+            return true;
+        })();
+        """#)
+    }
+
+    func testGeminiToggleSidebarEmitsGoldenScript() {
+        let webView = RecordingWebView()
+        GeminiProviderAdapter().toggleSidebar(in: webView)
+
+        XCTAssertEqual(webView.evaluatedScripts.last, #"""
+        (function() {
+            const selectors = [
+                "button[aria-label*=\"Main menu\" i]",
+                "button[aria-label*=\"Open sidebar\" i]",
+                "button[aria-label*=\"Close sidebar\" i]",
+                "button[aria-label*=\"sidebar\" i]",
+                "button[data-test-id=\"side-nav-toggle\"]"
+            ];
+            let tries = 0;
+            function attempt() {
+                for (const selector of selectors) {
+                    const button = document.querySelector(selector);
+                    if (button) { button.click(); return; }
+                }
+                if (++tries < 40) setTimeout(attempt, 75);
+            }
+            attempt();
+            return true;
+        })();
+        """#)
+    }
+
+    /// Gemini's composer focus deliberately keeps its scoped `||` chain; this
+    /// pins it so a future "cleanup" cannot silently flatten the scoping.
+    func testGeminiFocusComposerKeepsItsScopedChain() {
+        let webView = RecordingWebView()
+        GeminiProviderAdapter().focusComposer(in: webView)
+
+        let script = webView.evaluatedScripts.last ?? ""
+        XCTAssertTrue(script.contains(
+            "rich && rich.querySelector('[contenteditable=\"true\"]')"
+        ))
+        XCTAssertTrue(script.contains("div.ql-editor[contenteditable=\"true\"]"))
+    }
+
+    /// Regression test for the JSONSerialization abort: encoding a bare String
+    /// as a JSON top level raised an uncatchable NSInvalidArgumentException on
+    /// every Code-page sidebar toggle. The one-shot script must keep returning
+    /// a real Bool so the ⌘B fallback stays reachable.
+    func testClaudeCodeSidebarToggleEmitsOneShotClickScript() {
+        let webView = CodePageWebView()
+        ClaudeProviderAdapter().toggleSidebar(in: webView)
+
+        let script = webView.evaluatedScripts.last ?? ""
+        XCTAssertTrue(script.contains(#""[data-sidebar=\"trigger\"]""#))
+        XCTAssertTrue(script.contains("console.log('[Thinspace] Claude Code sidebar toggled');"))
+        XCTAssertTrue(script.contains("return false;"))
+        XCTAssertFalse(script.contains("setTimeout"), "the click script must stay one-shot")
     }
 }
 

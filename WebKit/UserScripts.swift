@@ -308,6 +308,29 @@ enum UserScripts {
             let observer = null;
             let observing = false;
 
+            // Every isInProviderConversation() becomes true only via an added
+            // element, a data-is-streaming flip, or a pathname change. A future
+            // detector that keys off text content or an attribute outside
+            // attributeFilter must add that attribute to the filter, or this
+            // fast path will miss its transition. `schedule` keeps its zero-arg
+            // signature because it is also the popstate listener and is called
+            // bare from the history hooks.
+            function relevantMutation(records) {
+                for (let i = 0; i < records.length; i++) {
+                    const record = records[i];
+                    if (record.type === 'attributes') return true;
+                    const added = record.addedNodes;
+                    for (let j = 0; j < added.length; j++) {
+                        if (added[j].nodeType === 1) return true;
+                    }
+                }
+                return false;
+            }
+
+            function onMutations(records) {
+                if (relevantMutation(records)) schedule();
+            }
+
             // Subtree childList observation makes WebKit build a MutationRecord
             // for every node the page inserts, which is heaviest while a
             // response streams. It is only needed to catch the transition into
@@ -315,7 +338,7 @@ enum UserScripts {
             // restored if a route change puts the page back outside one.
             function connect() {
                 if (observing || !document.body) return;
-                if (!observer) observer = new MutationObserver(schedule);
+                if (!observer) observer = new MutationObserver(onMutations);
                 observer.observe(document.body, {
                     childList: true,
                     subtree: true,
@@ -398,22 +421,25 @@ enum UserScripts {
             if (window.__aiChatPrivateChatObserverInstalled) return;
             window.__aiChatPrivateChatObserverInstalled = true;
 
-            function visible(element) {
-                if (!element) return false;
-                const style = getComputedStyle(element);
-                return style.visibility !== 'hidden' && style.display !== 'none' &&
-                    element.getClientRects().length > 0;
-            }
+            \(ProviderJS.visible)
 
-            function normalize(value) {
-                return (value || '').replace(/\\s+/g, ' ').trim();
-            }
+            \(ProviderJS.normalize)
 
+            // childNodes textContent joined with spaces approximates
+            // innerText's separator-at-box-boundary behavior without forcing a
+            // synchronous style+layout flush — this runs in a capture-phase
+            // click listener ahead of the page's own handlers. Relative to
+            // innerText the join can only add separators, never lose one the
+            // word-boundary regexes below depend on.
             function elementName(element) {
+                const joinedText = Array.prototype.map.call(
+                    element.childNodes,
+                    function(node) { return node.textContent; }
+                ).join(' ');
                 return [
                     element.getAttribute('aria-label'),
                     element.getAttribute('title'),
-                    element.innerText,
+                    joinedText,
                     element.textContent
                 ].map(normalize).filter(Boolean).join(' ');
             }
@@ -557,9 +583,6 @@ enum UserScripts {
                 // actually act on the shortcut.
                 schedule(1600);
                 schedule(2600);
-            };
-            window.__aiChatIsPrivateChatActive = function() {
-                return lastState === true;
             };
 
             document.addEventListener('click', function(event) {

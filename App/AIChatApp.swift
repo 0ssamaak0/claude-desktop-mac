@@ -39,7 +39,7 @@ struct AIChatApp: App {
     private var showMenuBarIcon = true
 
     var body: some Scene {
-        Window(AppCoordinator.Constants.mainWindowTitle, id: Constants.mainWindowID) {
+        Window(AppCoordinator.Constants.mainWindowTitle, id: AppCoordinator.Constants.mainWindowIdentifier) {
             MainWindowView(coordinator: coordinator)
                 .frame(
                     minWidth: Constants.mainWindowMinWidth,
@@ -235,7 +235,6 @@ extension AIChatApp {
         static let mainWindowDefaultWidth: CGFloat = 1000
         static let mainWindowDefaultHeight: CGFloat = 700
 
-        static let mainWindowID = "main"
         /// Template image set in the asset catalog, not an SF Symbol: the mark
         /// is redrawn for menu bar size rather than scaled from the app icon.
         static let menuBarIcon = "MenuBarIcon"

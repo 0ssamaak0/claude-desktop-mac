@@ -28,9 +28,13 @@ final class ConversationStateHandler: NSObject, WKScriptMessageHandler {
     ) {
         guard let body = message.body as? [String: Any],
               let inConversation = body["inConversation"] as? Bool else { return }
-        DispatchQueue.main.async { [weak self] in
-            self?.model?.handleConversationState(inConversation)
-        }
+        // WKScriptMessageHandler is main-actor in the SDK, so no hop is needed.
+        // Identity guard matches the KVO callbacks: a message enqueued against
+        // an outgoing WebView during a provider switch must not be applied to
+        // the new session. Assumes a single handler-bearing WebView — a future
+        // popup/auth window's messages would be silently swallowed here.
+        guard let model, message.webView === model.wkWebView else { return }
+        model.handleConversationState(inConversation)
     }
 }
 
@@ -43,15 +47,16 @@ final class PrivateChatStateHandler: NSObject, WKScriptMessageHandler {
     ) {
         guard let body = message.body as? [String: Any],
               let inPrivateChat = body["inPrivateChat"] as? Bool else { return }
-        DispatchQueue.main.async { [weak self] in
-            self?.model?.handlePrivateChatState(inPrivateChat)
-        }
+        // Same identity guard as ConversationStateHandler, for the same reason.
+        guard let model, message.webView === model.wkWebView else { return }
+        model.handlePrivateChatState(inPrivateChat)
     }
 }
 
 /// Owns the single active provider session. Provider login state lives in a
 /// separate persistent WebKit data store, while inactive providers have no
 /// WKWebView or WebContent process.
+@MainActor
 @Observable
 final class WebViewModel {
     private static let inactivityTimeout: TimeInterval = 10 * 60
@@ -60,7 +65,7 @@ final class WebViewModel {
     /// the app's tests can verify separation without exposing storage publicly.
     /// A `switch` rather than a lookup table so adding a provider fails to
     /// compile instead of trapping the first time that provider is selected.
-    static func dataStoreIdentifier(for provider: LLMProvider) -> UUID {
+    nonisolated static func dataStoreIdentifier(for provider: LLMProvider) -> UUID {
         switch provider {
         case .claude: return UUID(uuidString: "A1C4A7DE-9F3E-4B48-96C5-7C680CB57401")!
         case .gemini: return UUID(uuidString: "6E3B9C21-D4F8-4A75-AD12-8519B7E26002")!
@@ -83,10 +88,13 @@ final class WebViewModel {
 
     var onConversationStarted: (() -> Void)?
     var onPrivateChatStateChanged: ((Bool) -> Void)?
-    var onProviderChanged: ((LLMProvider) -> Void)?
+    /// Fired after an idle suspension completes, so the owner can release
+    /// resources that only matter while the session is live (the Chat Bar
+    /// panel). Deliberately a callback: the model must not reach into
+    /// AppCoordinator and pull window construction into itself.
+    var onDidSuspend: (() -> Void)?
 
     private var adapter: any ProviderAdapter
-    private let consoleLogHandler: ConsoleLogHandler
     private let conversationStateHandler: ConversationStateHandler
     private let privateChatStateHandler: PrivateChatStateHandler
     private var backObserver: NSKeyValueObservation?
@@ -99,25 +107,46 @@ final class WebViewModel {
     private var suspendedURL: URL?
     private var pendingPrivateChatProvider: LLMProvider?
 
+    /// Main window and Chat Bar both retain a representable. These records
+    /// track which containers last displayed this model — without retaining
+    /// them — and let the model push a replacement WebView to every live host.
+    ///
+    /// The broadcast matters for memory: both containers outlive every
+    /// provider switch, and whichever one is off-screen would otherwise keep
+    /// the previous `WKWebView` — and its WebContent process — alive until
+    /// SwiftUI happened to re-run `updateNSView` on a hidden window.
+    ///
+    /// Entries are weak and filtered on access, so a deallocated container
+    /// needs no explicit removal. `@ObservationIgnored` is required: `claimHost`
+    /// runs while SwiftUI is attaching the view, and mutating observed state
+    /// there would invalidate mid-update.
+    @ObservationIgnored
+    private var hosts: [WeakBrowserContainer] = []
+    @ObservationIgnored
+    private var hostOwner: WeakBrowserContainer?
+    /// A summon that races a page load parks its composer actions here; the
+    /// load completion delivers them, since the in-page bridges do not exist
+    /// until the provider document has committed. Covers the idle-resume path,
+    /// where the first ⌥Space otherwise silently dropped the captured text.
+    private var pendingSelection: CapturedSelection?
+    private var pendingFocus = false
+
     init(provider requestedProvider: LLMProvider? = nil) {
         let storedProvider = UserDefaults.standard
             .string(forKey: LLMProvider.defaultsKey)
             .flatMap(LLMProvider.init(rawValue:))
         let selectedProvider = requestedProvider ?? storedProvider ?? .claude
         let selectedAdapter = ProviderAdapters.adapter(for: selectedProvider)
-        let consoleHandler = ConsoleLogHandler()
         let conversationHandler = ConversationStateHandler()
         let privateChatHandler = PrivateChatStateHandler()
 
         provider = selectedProvider
         adapter = selectedAdapter
-        consoleLogHandler = consoleHandler
         conversationStateHandler = conversationHandler
         privateChatStateHandler = privateChatHandler
         wkWebView = Self.makeFullWebView(
             provider: selectedProvider,
             adapter: selectedAdapter,
-            consoleLogHandler: consoleHandler,
             conversationStateHandler: conversationHandler,
             privateChatStateHandler: privateChatHandler
         )
@@ -131,13 +160,19 @@ final class WebViewModel {
         observeOcclusionChanges()
     }
 
+    // In practice this never runs: the one instance is owned by
+    // AppCoordinator.shared for the process lifetime. The model is only ever
+    // referenced from the main actor, so a hypothetical last release happens
+    // there too; assumeIsolated documents and enforces that.
     deinit {
-        inactivityTimer?.invalidate()
-        if let occlusionObserver {
-            NotificationCenter.default.removeObserver(occlusionObserver)
+        MainActor.assumeIsolated {
+            inactivityTimer?.invalidate()
+            if let occlusionObserver {
+                NotificationCenter.default.removeObserver(occlusionObserver)
+            }
+            teardownObservers()
+            detachAndStop(wkWebView)
         }
-        teardownObservers()
-        detachAndStop(wkWebView)
     }
 
     // MARK: - Provider session
@@ -161,11 +196,9 @@ final class WebViewModel {
         UserDefaults.standard.set(newProvider.rawValue, forKey: LLMProvider.defaultsKey)
         isSuspended = false
         resetNavigationState(loading: true)
-        onProviderChanged?(newProvider)
         wkWebView = Self.makeFullWebView(
             provider: newProvider,
             adapter: adapter,
-            consoleLogHandler: consoleLogHandler,
             conversationStateHandler: conversationStateHandler,
             privateChatStateHandler: privateChatStateHandler
         )
@@ -321,6 +354,10 @@ final class WebViewModel {
 
     func focusComposer() {
         resumeIfSuspended()
+        if wkWebView.url == nil || wkWebView.isLoading {
+            pendingFocus = true
+            return
+        }
         adapter.focusComposer(in: wkWebView)
     }
 
@@ -328,6 +365,14 @@ final class WebViewModel {
 
     /// Adds the captured selection to the composer, leaving the caret above it.
     func insertCapturedSelection(_ selection: CapturedSelection) {
+        if wkWebView.url == nil || wkWebView.isLoading {
+            pendingSelection = selection
+            return
+        }
+        performInsertCapturedSelection(selection)
+    }
+
+    private func performInsertCapturedSelection(_ selection: CapturedSelection) {
         guard let data = try? JSONSerialization.data(withJSONObject: [
             "text": selection.text,
             "source": selection.sourceLabel
@@ -345,11 +390,18 @@ final class WebViewModel {
         )
     }
 
-    // MARK: - Browser policy API
-
-    func classification(for url: URL) -> ProviderURLClassification {
-        adapter.classify(url)
+    private func flushPendingComposerActions() {
+        if pendingFocus {
+            pendingFocus = false
+            adapter.focusComposer(in: wkWebView)
+        }
+        if let selection = pendingSelection {
+            pendingSelection = nil
+            performInsertCapturedSelection(selection)
+        }
     }
+
+    // MARK: - Browser policy API
 
     func shouldOpenExternally(_ url: URL) -> Bool {
         guard let scheme = url.scheme?.lowercased() else { return false }
@@ -402,7 +454,11 @@ final class WebViewModel {
             object: NSApp,
             queue: .main
         ) { [weak self] _ in
-            self?.suspendIfInactive()
+            // Delivered on the main queue; assumeIsolated keeps the call
+            // synchronous instead of deferring it a turn through a Task.
+            MainActor.assumeIsolated {
+                self?.suspendIfInactive()
+            }
         }
     }
 
@@ -425,7 +481,21 @@ final class WebViewModel {
             resetInactivityTimer()
             return
         }
+        suspend()
+        onDidSuspend?()
+    }
 
+    /// Releases the session when the launch configuration leaves no window on
+    /// screen, so a login-item launch does not keep a provider page resident.
+    /// Called from AppDelegate only after the main window is provably ordered
+    /// out; `hasObservableWindow` re-verifies nothing is on screen.
+    func suspendForHiddenLaunch() {
+        guard !isSuspended, !hasObservableWindow else { return }
+        suspend()
+        suspendedURL = nil   // resume must land on homeURL, as a visible launch does
+    }
+
+    private func suspend() {
         // Restored on resume so reclaiming memory never costs the user their place.
         suspendedURL = wkWebView.url.flatMap { url in
             url.scheme == "http" || url.scheme == "https" ? url : nil
@@ -450,7 +520,6 @@ final class WebViewModel {
         wkWebView = Self.makeFullWebView(
             provider: provider,
             adapter: adapter,
-            consoleLogHandler: consoleLogHandler,
             conversationStateHandler: conversationStateHandler,
             privateChatStateHandler: privateChatStateHandler
         )
@@ -495,7 +564,6 @@ final class WebViewModel {
         wkWebView = Self.makeFullWebView(
             provider: provider,
             adapter: adapter,
-            consoleLogHandler: consoleLogHandler,
             conversationStateHandler: conversationStateHandler,
             privateChatStateHandler: privateChatStateHandler
         )
@@ -505,14 +573,33 @@ final class WebViewModel {
         resetInactivityTimer()
     }
 
+    // MARK: - Host registry
+
+    func registerHost(_ container: BrowserWebViewContainer) {
+        hosts = hosts.filter { $0.value != nil && $0.value !== container }
+        hosts.append(WeakBrowserContainer(container))
+    }
+
+    func claimHost(_ container: BrowserWebViewContainer) {
+        registerHost(container)
+        hostOwner = WeakBrowserContainer(container)
+    }
+
+    func isHostOwner(_ container: BrowserWebViewContainer) -> Bool {
+        hostOwner?.value === container
+    }
+
     /// Hands the replacement WebView to every mounted host immediately. Without
     /// this the off-screen host keeps the previous WebView alive until SwiftUI
     /// next re-runs its update, which is not guaranteed to be prompt for a
-    /// hidden window.
+    /// hidden window. Iterates a local copy: `swapWebView` re-enters the model
+    /// (attach → claim → register) and mutates `hosts` mid-broadcast.
     private func notifyHostsOfWebViewChange() {
         let webView = wkWebView
-        MainActor.assumeIsolated {
-            BrowserWebViewHosts.webViewDidChange(to: webView, for: self)
+        let entries = hosts.filter { $0.value != nil }
+        hosts = entries
+        for entry in entries {
+            entry.value?.swapWebView(to: webView)
         }
     }
 
@@ -522,6 +609,8 @@ final class WebViewModel {
         isAtHome = true
         isLoading = loading
         isInConversation = false
+        pendingSelection = nil
+        pendingFocus = false
         handlePrivateChatState(false)
     }
 
@@ -542,7 +631,6 @@ final class WebViewModel {
     private static func makeFullWebView(
         provider: LLMProvider,
         adapter: any ProviderAdapter,
-        consoleLogHandler: ConsoleLogHandler,
         conversationStateHandler: ConversationStateHandler,
         privateChatStateHandler: PrivateChatStateHandler
     ) -> WKWebView {
@@ -565,7 +653,7 @@ final class WebViewModel {
         )
         #if DEBUG
         configuration.userContentController.add(
-            consoleLogHandler,
+            ConsoleLogHandler(),
             name: UserScripts.consoleLogHandler
         )
         #endif
@@ -627,27 +715,43 @@ final class WebViewModel {
     private func setupObservers() {
         teardownObservers()
 
-        backObserver = wkWebView.observe(\.canGoBack, options: [.new, .initial]) {
+        // Change deliveries only. Every caller registers these against a freshly
+        // built WKWebView whose state the model has already seeded —
+        // resetNavigationState on the rebuild paths, the declared defaults in
+        // init — so .initial would only re-assert known values, and for
+        // isLoading it would assert the wrong one (a new webview reports false
+        // while a load is about to start).
+        //
+        // Same-value writes are skipped: @Observable's setter notifies
+        // unconditionally, and a redundant canGoBack write rebuilds the whole
+        // App Scene command tree.
+        backObserver = wkWebView.observe(\.canGoBack, options: [.new]) {
             [weak self] webView, _ in
             DispatchQueue.main.async {
                 guard let self, webView === self.wkWebView else { return }
-                self.canGoBack = !self.isAtHome && webView.canGoBack
+                let canGoBack = !self.isAtHome && webView.canGoBack
+                if canGoBack != self.canGoBack { self.canGoBack = canGoBack }
             }
         }
-        forwardObserver = wkWebView.observe(\.canGoForward, options: [.new, .initial]) {
+        forwardObserver = wkWebView.observe(\.canGoForward, options: [.new]) {
             [weak self] webView, _ in
             DispatchQueue.main.async {
                 guard let self, webView === self.wkWebView else { return }
-                self.canGoForward = webView.canGoForward
+                let canGoForward = webView.canGoForward
+                if canGoForward != self.canGoForward {
+                    self.canGoForward = canGoForward
+                }
             }
         }
-        loadingObserver = wkWebView.observe(\.isLoading, options: [.new, .initial]) {
+        loadingObserver = wkWebView.observe(\.isLoading, options: [.new]) {
             [weak self] webView, _ in
             DispatchQueue.main.async {
                 guard let self, webView === self.wkWebView else { return }
-                self.isLoading = webView.isLoading
+                let isLoading = webView.isLoading
+                if isLoading != self.isLoading { self.isLoading = isLoading }
                 if !webView.isLoading {
                     self.performPendingPrivateChatIfReady()
+                    self.flushPendingComposerActions()
                 }
             }
         }
@@ -658,8 +762,10 @@ final class WebViewModel {
                 if url.absoluteString != "about:blank" && !self.isSuspended {
                     self.resetInactivityTimer()
                 }
-                self.isAtHome = self.adapter.isHomeSurface(url)
-                self.canGoBack = !self.isAtHome && webView.canGoBack
+                let atHome = self.adapter.isHomeSurface(url)
+                if atHome != self.isAtHome { self.isAtHome = atHome }
+                let canGoBack = !atHome && webView.canGoBack
+                if canGoBack != self.canGoBack { self.canGoBack = canGoBack }
             }
         }
     }

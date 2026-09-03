@@ -10,13 +10,22 @@ import WebKit
 /// Hosts whichever WebView is currently owned by WebViewModel. A WebView can
 /// move between the main window and Chat Bar; ownership tracking prevents an
 /// off-screen host from stealing a newly rebuilt WebView during a provider switch.
+@MainActor
 struct BrowserWebView: NSViewRepresentable {
     let webViewModel: WebViewModel
-    private let webView: WKWebView
+    /// Recorded, never retained. Reading `wkWebView` during body evaluation is
+    /// what registers the Observation dependency that invalidates this host
+    /// when the model swaps WebViews; holding the object itself would keep a
+    /// suspended or replaced WebView — and its WebContent process — alive
+    /// until SwiftUI next re-evaluated a hidden window's body. Do not delete
+    /// this property or move the read out of `init`: ChatBarView.body has no
+    /// other observable read, so the Chat Bar host would silently stop being
+    /// invalidated on provider switch and suspend/resume.
+    private let webViewIdentity: ObjectIdentifier
 
     init(webViewModel: WebViewModel) {
         self.webViewModel = webViewModel
-        webView = webViewModel.wkWebView
+        webViewIdentity = ObjectIdentifier(webViewModel.wkWebView)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -25,7 +34,7 @@ struct BrowserWebView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> BrowserWebViewContainer {
         BrowserWebViewContainer(
-            webView: webView,
+            webView: webViewModel.wkWebView,
             webViewModel: webViewModel,
             coordinator: context.coordinator
         )
@@ -33,8 +42,12 @@ struct BrowserWebView: NSViewRepresentable {
 
     func updateNSView(_ container: BrowserWebViewContainer, context: Context) {
         context.coordinator.webViewModel = webViewModel
-        if container.webView !== webView {
-            container.swapWebView(to: webView)
+        // Compared against the live model value, not the recorded identity: a
+        // stale cached view value must not swap the container back to a
+        // WebView the model has already moved past.
+        let current = webViewModel.wkWebView
+        if container.webView !== current {
+            container.swapWebView(to: current)
         }
     }
 
@@ -267,7 +280,7 @@ final class BrowserWebViewContainer: NSView {
         self.coordinator = coordinator
         super.init(frame: .zero)
         autoresizesSubviews = true
-        BrowserWebViewHosts.register(self, for: webViewModel)
+        webViewModel.registerHost(self)
     }
 
     required init?(coder: NSCoder) {
@@ -282,9 +295,7 @@ final class BrowserWebViewContainer: NSView {
 
     func swapWebView(to newWebView: WKWebView) {
         guard webView !== newWebView else { return }
-        let retainedOwnership = webViewModel.map {
-            BrowserWebViewHosts.isOwner(self, for: $0)
-        } ?? false
+        let retainedOwnership = webViewModel?.isHostOwner(self) == true
         if webView.superview === self {
             webView.removeFromSuperview()
         }
@@ -324,7 +335,7 @@ final class BrowserWebViewContainer: NSView {
 
     private func attachWebView() {
         guard let webViewModel else { return }
-        BrowserWebViewHosts.claim(self, for: webViewModel)
+        webViewModel.claimHost(self)
         guard webView.superview !== self else { return }
         webView.removeFromSuperview()
         webView.frame = bounds
@@ -335,51 +346,9 @@ final class BrowserWebViewContainer: NSView {
     }
 }
 
-/// Main window and Chat Bar both retain a representable. This registry records
-/// which container last displayed a model without retaining either object, and
-/// lets the model push a replacement WebView to every live host.
-///
-/// The broadcast matters for memory: both containers outlive every provider
-/// switch, and whichever one is off-screen would otherwise keep the previous
-/// `WKWebView` — and its WebContent process — alive until SwiftUI happened to
-/// re-run `updateNSView` on a hidden window.
-///
-/// Entries are weak and are filtered on access, so a deallocated container
-/// needs no explicit removal and `deinit` never has to reach main-actor state.
-@MainActor
-enum BrowserWebViewHosts {
-    private final class WeakContainer {
-        weak var value: BrowserWebViewContainer?
-        init(_ value: BrowserWebViewContainer) { self.value = value }
-    }
-
-    private static var hosts: [ObjectIdentifier: [WeakContainer]] = [:]
-    private static var owners: [ObjectIdentifier: WeakContainer] = [:]
-
-    static func register(_ container: BrowserWebViewContainer, for model: WebViewModel) {
-        let key = ObjectIdentifier(model)
-        var entries = hosts[key, default: []].filter {
-            $0.value != nil && $0.value !== container
-        }
-        entries.append(WeakContainer(container))
-        hosts[key] = entries
-    }
-
-    static func claim(_ container: BrowserWebViewContainer, for model: WebViewModel) {
-        register(container, for: model)
-        owners[ObjectIdentifier(model)] = WeakContainer(container)
-    }
-
-    static func isOwner(_ container: BrowserWebViewContainer, for model: WebViewModel) -> Bool {
-        owners[ObjectIdentifier(model)]?.value === container
-    }
-
-    static func webViewDidChange(to webView: WKWebView, for model: WebViewModel) {
-        let key = ObjectIdentifier(model)
-        let entries = hosts[key, default: []].filter { $0.value != nil }
-        hosts[key] = entries.isEmpty ? nil : entries
-        for entry in entries {
-            entry.value?.swapWebView(to: webView)
-        }
-    }
+/// A weak slot in WebViewModel's host registry. See the registry fields on
+/// `WebViewModel` for the memory invariant it exists to uphold.
+final class WeakBrowserContainer {
+    weak var value: BrowserWebViewContainer?
+    init(_ value: BrowserWebViewContainer) { self.value = value }
 }

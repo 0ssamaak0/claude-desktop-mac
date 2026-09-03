@@ -34,6 +34,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    func applicationShouldTerminateAfterLastWindowClosed(
+        _ sender: NSApplication
+    ) -> Bool {
+        // Showing the Chat Bar deliberately orders out the main SwiftUI window.
+        // AppKit does not count its floating NSPanel as an ordinary application
+        // window, so without this override it schedules process termination just
+        // as the panel is presented. Keep the menu bar app and global shortcut
+        // alive until the user explicitly chooses Quit.
+        false
+    }
+
     private func configureLaunchVisibility() {
         AppTheme.current.apply()
 
@@ -54,10 +65,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(
             deadline: .now() + AIChatApp.Constants.hideWindowDelay
         ) {
-            for window in NSApp.windows where
-                window.identifier?.rawValue == AIChatApp.Constants.mainWindowID ||
-                window.title == AppCoordinator.Constants.mainWindowTitle {
-                window.orderOut(nil)
+            MainActor.assumeIsolated {
+                AppCoordinator.mainWindow()?.orderOut(nil)
+                // A login-item launch has already started loading a provider
+                // page nobody will see; release it now that the window is out.
+                AppCoordinator.shared.webViewModel.suspendForHiddenLaunch()
             }
         }
     }

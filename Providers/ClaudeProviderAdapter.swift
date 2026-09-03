@@ -29,13 +29,6 @@ struct ClaudeProviderAdapter: ProviderAdapter {
         return .other
     }
 
-    func openNewChat(in webView: WKWebView) {
-        dispatchKeyboardShortcut(
-            key: "o", code: "KeyO", keyCode: 79, shift: true,
-            privateChatState: false, in: webView
-        )
-    }
-
     /// Claude's new-chat shortcut preserves Incognito mode. A fresh `/new`
     /// navigation explicitly leaves that mode before creating the normal chat.
     func exitPrivateChat(in webView: WKWebView) {
@@ -57,12 +50,7 @@ struct ClaudeProviderAdapter: ProviderAdapter {
             const MAX_TRIES = 50;
             let tries = 0;
 
-            function visible(element) {
-                if (!element) return false;
-                const style = getComputedStyle(element);
-                return style.visibility !== 'hidden' && style.display !== 'none' &&
-                    element.getClientRects().length > 0;
-            }
+            \(ProviderJS.visible)
 
             function findButton() {
                 for (const selector of selectors) {
@@ -109,7 +97,7 @@ struct ClaudeProviderAdapter: ProviderAdapter {
 
     func toggleSidebar(in webView: WKWebView) {
         if page(for: webView.url ?? homeURL) == .code {
-            let source = retryingClickScript(
+            let source = clickScript(
                 selectors: [
                     "[data-sidebar=\"trigger\"]",
                     "button[aria-label*=\"toggle sidebar\" i]",
@@ -155,28 +143,17 @@ struct ClaudeProviderAdapter: ProviderAdapter {
     }
 
     func focusComposer(in webView: WKWebView) {
-        let source = """
-        (function() {
-            const selectors = [
-                'div.ProseMirror[contenteditable="true"]',
-                'div[contenteditable="true"][data-placeholder]',
-                'textarea[placeholder*="Message" i]',
-                'textarea[placeholder*="Reply" i]',
-                '[contenteditable="true"]',
-                'textarea'
-            ];
-            let tries = 0;
-            function attempt() {
-                for (const selector of selectors) {
-                    const input = document.querySelector(selector);
-                    if (input) { input.focus(); return; }
-                }
-                if (++tries < 40) setTimeout(attempt, 75);
-            }
-            attempt();
-            return true;
-        })();
-        """
+        let source = retryingActionScript(
+            selectors: [
+                "div.ProseMirror[contenteditable=\"true\"]",
+                "div[contenteditable=\"true\"][data-placeholder]",
+                "textarea[placeholder*=\"Message\" i]",
+                "textarea[placeholder*=\"Reply\" i]",
+                "[contenteditable=\"true\"]",
+                "textarea"
+            ],
+            action: .focus
+        )
         runJavaScript(source, named: "focus composer", in: webView)
     }
 
@@ -215,11 +192,10 @@ struct ClaudeProviderAdapter: ProviderAdapter {
     }
     """
 
-    private func retryingClickScript(selectors: [String], actionName: String) -> String {
-        let encoded = selectors.compactMap { selector -> String? in
-            guard let data = try? JSONSerialization.data(withJSONObject: selector) else { return nil }
-            return String(data: data, encoding: .utf8)
-        }.joined(separator: ",")
+    /// One-shot click: the Bool result feeds toggleSidebar's ⌘B fallback,
+    /// so this must not retry and must not always return true.
+    private func clickScript(selectors: [String], actionName: String) -> String {
+        let encoded = selectors.map { Self.javaScriptString($0) }.joined(separator: ",")
         return """
         (function() {
             const selectors = [\(encoded)];

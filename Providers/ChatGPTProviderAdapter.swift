@@ -36,13 +36,6 @@ struct ChatGPTProviderAdapter: ProviderAdapter {
         return .other
     }
 
-    func openNewChat(in webView: WKWebView) {
-        dispatchKeyboardShortcut(
-            key: "o", code: "KeyO", keyCode: 79, shift: true,
-            privateChatState: false, in: webView
-        )
-    }
-
     /// Finds and activates ChatGPT's dynamically rendered Temporary Chat pill.
     func activatePrivateChat(in webView: WKWebView) {
         let source = """
@@ -67,12 +60,7 @@ struct ChatGPTProviderAdapter: ProviderAdapter {
             const ACTIVE_STATES = new Set(['true', 'on', 'checked', 'active']);
             let tries = 0;
 
-            function visible(element) {
-                if (!element) return false;
-                const style = getComputedStyle(element);
-                return style.visibility !== 'hidden' && style.display !== 'none' &&
-                    element.getClientRects().length > 0;
-            }
+            \(ProviderJS.visible)
 
             function asClickable(element) {
                 if (!element) return null;
@@ -81,9 +69,7 @@ struct ChatGPTProviderAdapter: ProviderAdapter {
                     element.querySelector('button, [role="button"]');
             }
 
-            function normalize(value) {
-                return (value || '').replace(/\\s+/g, ' ').trim();
-            }
+            \(ProviderJS.normalize)
 
             function names(element) {
                 return [
@@ -230,29 +216,18 @@ struct ChatGPTProviderAdapter: ProviderAdapter {
     }
 
     func focusComposer(in webView: WKWebView) {
-        let source = """
-        (function() {
-            const selectors = [
-                '#prompt-textarea',
-                '[data-testid="composer-text-input"]',
-                'div.ProseMirror[contenteditable="true"]',
-                'div[contenteditable="true"][data-placeholder]',
-                'textarea[placeholder*="Message" i]',
-                '[contenteditable="true"]',
-                'textarea'
-            ];
-            let tries = 0;
-            function attempt() {
-                for (const selector of selectors) {
-                    const input = document.querySelector(selector);
-                    if (input) { input.focus(); return; }
-                }
-                if (++tries < 40) setTimeout(attempt, 75);
-            }
-            attempt();
-            return true;
-        })();
-        """
+        let source = retryingActionScript(
+            selectors: [
+                "#prompt-textarea",
+                "[data-testid=\"composer-text-input\"]",
+                "div.ProseMirror[contenteditable=\"true\"]",
+                "div[contenteditable=\"true\"][data-placeholder]",
+                "textarea[placeholder*=\"Message\" i]",
+                "[contenteditable=\"true\"]",
+                "textarea"
+            ],
+            action: .focus
+        )
         runJavaScript(source, named: "focus composer", in: webView)
     }
 

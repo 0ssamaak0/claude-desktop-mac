@@ -31,27 +31,26 @@ extension NSScreen {
         )
     }
 
-    /// Returns the bottom-center position for a window on this screen with the given offset from dock
-    func bottomCenterPoint(for windowSize: NSSize, dockOffset: CGFloat) -> NSPoint {
-        NSPoint(
-            x: visibleFrame.origin.x + (visibleFrame.width - windowSize.width) / 2,
-            y: visibleFrame.origin.y + dockOffset
-        )
-    }
+    /// Horizontal inset for the left/right panel positions. Independent from
+    /// the vertical dock offset even though both happen to be 50 today.
+    private static let sideOffset: CGFloat = 50
 
     /// Returns the position for a window based on the given panel position setting
-    func point(for windowSize: NSSize, position: PanelPosition, dockOffset: CGFloat, sideOffset: CGFloat = 50) -> NSPoint {
+    func point(for windowSize: NSSize, position: PanelPosition, dockOffset: CGFloat) -> NSPoint {
         switch position {
         case .bottomLeft:
             return NSPoint(
-                x: visibleFrame.origin.x + sideOffset,
+                x: visibleFrame.origin.x + Self.sideOffset,
                 y: visibleFrame.origin.y + dockOffset
             )
         case .bottomCenter, .rememberLast:
-            return bottomCenterPoint(for: windowSize, dockOffset: dockOffset)
+            return NSPoint(
+                x: visibleFrame.origin.x + (visibleFrame.width - windowSize.width) / 2,
+                y: visibleFrame.origin.y + dockOffset
+            )
         case .bottomRight:
             return NSPoint(
-                x: visibleFrame.origin.x + visibleFrame.width - windowSize.width - sideOffset,
+                x: visibleFrame.origin.x + visibleFrame.width - windowSize.width - Self.sideOffset,
                 y: visibleFrame.origin.y + dockOffset
             )
         }

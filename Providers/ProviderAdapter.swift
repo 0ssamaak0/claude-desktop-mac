@@ -67,9 +67,56 @@ protocol ProviderAdapter {
     func focusComposer(in webView: WKWebView)
 }
 
+/// JavaScript helper functions shared verbatim across the injected scripts.
+/// Interpolated into each script that needs them: every script stays
+/// self-contained in the page (no cross-script global), so a missing or late
+/// observer script can never turn another script's retry loop into a silent
+/// no-op.
+enum ProviderJS {
+    static let visible = """
+    function visible(element) {
+        if (!element) return false;
+        const style = getComputedStyle(element);
+        return style.visibility !== 'hidden' && style.display !== 'none' &&
+            element.getClientRects().length > 0;
+    }
+    """
+
+    /// Raw literal: inside a plain string this regex would need `\\s+`, and
+    /// getting that wrong silently turns it into a literal-`s` match.
+    static let normalize = #"""
+    function normalize(value) {
+        return (value || '').replace(/\s+/g, ' ').trim();
+    }
+    """#
+}
+
+/// The verb a `retryingActionScript` performs on the first selector match. An
+/// enum rather than a free-form string so no caller can interpolate arbitrary
+/// JavaScript into the generated source.
+enum RetryAction {
+    case focus
+    case click
+
+    /// Local variable name and method call match the historical per-adapter
+    /// scripts byte for byte.
+    var variableName: String { self == .focus ? "input" : "button" }
+    var invocation: String { self == .focus ? "focus" : "click" }
+}
+
 extension ProviderAdapter {
     var capabilities: ProviderCapabilities { provider.capabilities }
     var privateChatStartsAtHome: Bool { false }
+
+    /// All three providers bind ⌘⇧O to a new chat. A provider that does not
+    /// should override this rather than inherit a keystroke that means
+    /// something else on its page.
+    func openNewChat(in webView: WKWebView) {
+        dispatchKeyboardShortcut(
+            key: "o", code: "KeyO", keyCode: 79, shift: true,
+            privateChatState: false, in: webView
+        )
+    }
 
     func exitPrivateChat(in webView: WKWebView) {
         openNewChat(in: webView)
@@ -166,6 +213,39 @@ extension ProviderAdapter {
         })();
         """
         runJavaScript(source, named: "keyboard shortcut \(code)", in: webView)
+    }
+
+    /// Retry-until-found skeleton shared by the provider actions that must
+    /// wait for an SPA to render its control. The first selector that matches
+    /// wins; a miss retries on a fixed budget and then gives up silently,
+    /// exactly as the per-adapter copies this replaces did.
+    func retryingActionScript(
+        selectors: [String],
+        action: RetryAction,
+        tries: Int = 40,
+        interval: Int = 75
+    ) -> String {
+        let encoded = selectors
+            .map { "        \(Self.javaScriptString($0))" }
+            .joined(separator: ",\n")
+        let variable = action.variableName
+        return """
+        (function() {
+            const selectors = [
+        \(encoded)
+            ];
+            let tries = 0;
+            function attempt() {
+                for (const selector of selectors) {
+                    const \(variable) = document.querySelector(selector);
+                    if (\(variable)) { \(variable).\(action.invocation)(); return; }
+                }
+                if (++tries < \(tries)) setTimeout(attempt, \(interval));
+            }
+            attempt();
+            return true;
+        })();
+        """
     }
 
     static func javaScriptString(_ value: String) -> String {
